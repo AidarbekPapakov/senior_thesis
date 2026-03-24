@@ -1,0 +1,214 @@
+Chapter 1 — Introduction
+1.1 Motivation
+
+Earthquakes remain one of the most destructive natural hazards affecting human societies. Unlike many other natural disasters, earthquakes occur with little to no immediate precursory signals detectable by conventional monitoring systems. As a result, communities located near active tectonic regions often experience catastrophic damage within seconds of the onset of strong ground motion. The societal and economic consequences of large earthquakes can therefore be severe, including loss of life, infrastructure collapse, and long-term disruption of essential services.
+
+Earthquake Early Warning (EEW) systems aim to mitigate these consequences by providing alerts shortly after an earthquake begins but before the most destructive shaking reaches populated areas. The fundamental principle behind EEW is based on the difference in propagation speed between seismic waves. When an earthquake occurs, it generates several types of seismic waves, most notably primary waves (P-waves) and secondary waves (S-waves). P-waves propagate through the Earth's interior at higher velocities, typically in the range of 5–8 km/s, whereas S-waves travel more slowly, at approximately 3–4 km/s. Importantly, S-waves and subsequent surface waves are responsible for the majority of structural damage during earthquakes.
+
+This difference in propagation speed provides a short but valuable time window during which early warning systems can detect the initial P-waves and estimate the severity of the ongoing event before the arrival of destructive shaking. Even a warning of several seconds can enable automated protective actions such as stopping trains, shutting down industrial processes, opening fire station doors, and issuing alerts to the public.
+
+However, producing reliable warnings in such short time intervals presents a significant scientific and engineering challenge. EEW systems must rapidly detect seismic signals, determine whether they correspond to a true earthquake event, estimate its magnitude and location, and determine whether an alert should be issued. These computations must occur in near real time while operating on noisy sensor data and under severe uncertainty regarding the final scale of the earthquake.
+
+The challenge becomes particularly acute when attempting to estimate the final magnitude of an earthquake using only the first few seconds of recorded seismic data. Accurate magnitude estimation is essential because alert thresholds are typically defined in terms of expected ground motion intensity, which correlates strongly with earthquake magnitude. If the magnitude is underestimated, warnings may not be issued in time for dangerous events. Conversely, overestimation may produce false alarms, reducing public trust in the warning system.
+
+Traditional EEW methods struggle to solve this problem reliably when only early P-wave data is available. This limitation motivates the exploration of modern machine learning approaches capable of extracting complex patterns from seismic signals.
+
+1.2 The Core Challenge of Early Magnitude Estimation
+
+The magnitude of an earthquake reflects the total energy released during rupture along a fault. Determining this magnitude precisely typically requires observing a substantial portion of the seismic waveform, including both P-waves and S-waves recorded across multiple stations. In conventional seismological analysis, magnitude estimation is therefore performed after the event has largely unfolded.
+
+In an EEW setting, however, such complete information is not available. Instead, the system must attempt to infer the final magnitude using only the earliest observable portion of the seismic signal. Typically, this consists of a short window beginning at the arrival of the P-wave and extending for only a few seconds.
+
+Formally, consider a seismic waveform 
+𝑥
+(
+𝑡
+)
+x(t) recorded at a station. Let 
+𝑡
+𝑃
+t
+P
+	​
+
+ denote the arrival time of the P-wave. An EEW system may only have access to a short segment of the signal:
+
+𝑥
+(
+𝑡
+)
+,
+𝑡
+∈
+[
+𝑡
+𝑃
+,
+ 
+𝑡
+𝑃
++
+𝑊
+]
+x(t),t∈[t
+P
+	​
+
+,t
+P
+	​
+
++W]
+
+where 
+𝑊
+W is the available observation window, often between 3 and 8 seconds. The task is to estimate the final earthquake magnitude 
+𝑀
+M using only this truncated signal segment.
+
+This problem is fundamentally difficult because the earliest part of the waveform may not yet contain sufficient information about the full rupture process. In many earthquakes, the rupture begins locally and grows progressively along the fault plane. Consequently, the early waveform may appear similar for both small and large events, making it challenging to distinguish them using simple analytical methods.
+
+Several studies have debated whether the initial rupture contains deterministic information about final magnitude. Some earlier hypotheses suggested that the first few seconds of seismic signals may already encode differences between small and large events. However, more recent research indicates that reliable magnitude estimation from very short windows remains an open challenge.
+
+Therefore, an effective EEW system must extract subtle patterns from the evolving waveform that may indicate the scale of the ongoing rupture. This is precisely the type of pattern recognition problem for which modern machine learning techniques are well suited.
+
+1.3 Limitations of Classical EEW Approaches
+
+Traditional EEW systems rely on deterministic signal processing algorithms and empirical relationships derived from seismological observations. Two widely used approaches are the STA/LTA algorithm and Bayesian magnitude estimation frameworks implemented in systems such as PRESTo.
+
+STA/LTA Detection
+
+The Short-Term Average to Long-Term Average (STA/LTA) algorithm is one of the earliest and most widely used methods for earthquake detection. The method computes two moving averages of the signal amplitude:
+
+a short-term average (STA) representing recent signal energy
+
+a long-term average (LTA) representing background noise
+
+The detection statistic is defined as the ratio
+
+𝑅
+(
+𝑡
+)
+=
+STA
+(
+𝑡
+)
+LTA
+(
+𝑡
+)
+R(t)=
+LTA(t)
+STA(t)
+	​
+
+
+When this ratio exceeds a predefined threshold, the algorithm identifies the presence of a seismic event. While STA/LTA is effective for detecting sudden increases in signal energy, it does not provide robust estimates of earthquake magnitude, particularly in the early stages of the waveform.
+
+Bayesian Magnitude Estimation
+
+More sophisticated systems, such as the PRESTo EEW framework, use Bayesian methods to estimate earthquake parameters from observations across multiple stations. These methods incorporate prior knowledge about earthquake distributions and update estimates of magnitude and location as additional data arrives.
+
+Although Bayesian approaches improve estimation accuracy compared to simple signal processing techniques, they still depend heavily on empirical features extracted from the waveform, such as peak displacement or dominant period. These features often require observing a larger portion of the signal than is available in the earliest seconds after P-wave arrival.
+
+Furthermore, classical systems typically rely on manually engineered features designed by domain experts. Such features may fail to capture complex nonlinear relationships present in seismic data.
+
+1.4 The Potential of Deep Learning in EEW
+
+Recent advances in deep learning have significantly expanded the capabilities of automated signal analysis systems. Deep neural networks can learn hierarchical feature representations directly from raw data, eliminating the need for manually engineered features.
+
+In the context of seismology, deep learning has already demonstrated strong performance in tasks such as seismic phase detection, event classification, and waveform denoising. For example, neural network architectures have been developed to detect P-wave and S-wave arrivals with accuracy exceeding traditional signal processing methods.
+
+The key advantage of deep learning lies in its ability to approximate complex nonlinear mappings between inputs and outputs. A neural network can be viewed as a function
+
+𝑓
+𝜃
+:
+𝑅
+𝑛
+→
+𝑅
+f
+θ
+	​
+
+:R
+n
+→R
+
+parameterized by a set of learnable weights 
+𝜃
+θ. During training, these parameters are optimized to minimize a loss function measuring the discrepancy between predicted outputs and ground truth labels.
+
+When applied to seismic signals, neural networks can learn to recognize patterns in waveform data that correlate with earthquake magnitude. These patterns may involve subtle combinations of frequency content, temporal evolution, and signal amplitude that are difficult to capture using conventional methods.
+
+Moreover, deep learning models can process large volumes of historical seismic data, enabling them to learn statistical relationships across a wide range of earthquake magnitudes and geological environments.
+
+1.5 Proposed Approach
+
+This thesis proposes a deep learning pipeline for real-time earthquake magnitude estimation using early P-wave observations. The system operates on three-component seismic waveform data and predicts a scalar estimate of earthquake magnitude using only the first few seconds of the signal following P-wave arrival.
+
+The proposed model architecture combines Convolutional Neural Networks (CNNs) and Long Short-Term Memory (LSTM) networks. The architecture is designed to capture both the spectral characteristics and temporal evolution of seismic signals.
+
+The processing pipeline can be summarized as follows:
+
+Waveform acquisition
+Three-component seismic signals are collected from multiple datasets, including global and regional seismic archives.
+
+Time–frequency transformation
+The raw waveform is converted into a spectrogram, representing how signal energy is distributed across frequency and time.
+
+CNN feature extraction
+Convolutional neural networks process the spectrogram to identify local patterns in the time–frequency domain.
+
+Temporal modeling with LSTM
+The sequence of features extracted by the CNN is processed by an LSTM network to capture the temporal evolution of the seismic signal.
+
+Magnitude regression
+A fully connected layer produces a scalar estimate of earthquake magnitude.
+
+This CNN–LSTM architecture is motivated by the physical properties of seismic signals. Spectrograms represent the distribution of frequency content over time, which reflects the dynamics of the rupture process. CNNs are effective at extracting local spatial patterns from such representations, while LSTMs capture temporal dependencies that unfold over the observation window.
+
+By combining these two modeling paradigms, the system aims to infer earthquake magnitude from subtle features present in the earliest stages of the waveform.
+
+1.6 Scope and Limitations
+
+This thesis focuses specifically on single-station magnitude estimation using early P-wave observations. The study investigates whether deep learning models can reliably estimate earthquake magnitude using short waveform segments of 3–8 seconds following P-wave arrival.
+
+The analysis is conducted using multiple publicly available seismic datasets as well as regional seismic data relevant to Central Asia. These datasets provide labeled waveform recordings and associated earthquake metadata necessary for supervised learning.
+
+However, several limitations must be acknowledged:
+
+Prospective evaluation
+The experimental results presented in this thesis are intended as a proof-of-concept investigation rather than a fully deployed operational EEW system.
+
+Single-station analysis
+The proposed model processes waveforms from individual stations. Real-world EEW systems typically integrate observations from multiple stations to improve reliability.
+
+Data imbalance
+Earthquake magnitude distributions follow the Gutenberg–Richter law, meaning that large earthquakes occur far less frequently than small ones. This imbalance presents challenges for training machine learning models.
+
+Regional variability
+Seismic waveforms depend on local geological conditions. Models trained on global datasets may require regional fine-tuning for optimal performance.
+
+Despite these limitations, the proposed approach provides a framework for exploring the application of deep learning to early earthquake magnitude estimation.
+
+1.7 Thesis Structure
+
+The remainder of this thesis is organized as follows.
+
+Chapter 2 provides background information on seismological principles and reviews existing earthquake early warning systems, including both classical and machine learning approaches.
+
+Chapter 3 introduces the mathematical foundations of the proposed methodology. This chapter formally defines the signal processing techniques, neural network architectures, optimization methods, and evaluation metrics used in the study.
+
+Chapter 4 describes the datasets used in the experiments and outlines the preprocessing pipeline for converting raw seismic waveforms into spectrogram representations suitable for neural network input.
+
+Chapter 5 presents the architecture of the proposed CNN–LSTM model, including detailed descriptions of the convolutional backbone, recurrent module, and regression head.
+
+Chapter 6 outlines the experimental design and evaluation methodology used to assess the model's performance.
+
+Chapter 7 discusses the anticipated results, potential limitations, and implications of the proposed approach for earthquake early warning systems.
+
+Finally, Chapter 8 summarizes the key findings of the thesis and outlines directions for future research in machine-learning-based seismic monitoring.

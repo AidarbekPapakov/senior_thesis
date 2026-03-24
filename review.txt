@@ -1,0 +1,332 @@
+1. Terminology: 
+    Geophysics related:
+        EWS/EEW (Early Warning System/Earthquake Early Warning), P-waves, S-waves, foreshocks, aftershocks, mainshock, hypocenter, epicenter, magnitude, MMI, 
+    ML related:
+        CNNs, RNNs - main components of the model that are used in ML systems for EWS 
+        Train & Validation sets, metrics and their explanation (Accuracy, precision, recall, beta score and etc.)
+        Class disbalance and its implications
+        Feature space
+
+2. Several kinds of natural data: 
+    ground-based (High quality data, but sparse): 
+        seismometers, ground motion sensors, 
+    space-based (Lots of noise and gaps in data): 
+        GNSS such as GPS and others. 
+
+    TODO: Decide which to use seismic or GNSS data for EWS
+
+3. Synth data: 
+    Why it is needed?
+    How it is generated?
+    What are its limitations?
+
+4. Current systems struggle from lack of high-magnitute data
+
+
+5. Existing ML systems for EWS: 
+
+    5.0 PhaseNet (https://arxiv.org/pdf/1803.03211):
+
+        Neural network that detects and localizes P-waves and S-waves
+
+        basically a more robust and more general version of STA/LTA algorithm
+        
+        * Quotes:
+            """
+            Instead of using manually defined features, deep neural networks learn the features
+            from labeled data, both noise and signal, which proves a powerful advantage for complex
+            seismic waveforms
+            """
+
+
+    5.1 M-LARGE (https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2021JB022703):
+
+        * As stated by the authors, only useful for high-magnitude earthquakes (M7+), so it is not a good candidate for our purposes
+        * States as a presumption: 
+            initial rupture signals (i.e., <5 s) do not provide the information of final magnitude, 
+            as opposed to strongly deterministic scenarios (Olson & Allen, 2005; Wu & Zhao, 2006) 
+            where the initial rupture signal for small or large magnitude events are fundamentally different.
+        * Describes in detail data synthesis, and links the synthesized data - (https://zenodo.org/records/5015610)
+        * Provides code implementation of the system - (https://zenodo.org/records/4527253)
+    
+        * Quotes:
+            """
+            Rather M-LARGE requires triggering, ostensibly by a seismic system 
+            as is common in other GNSS algorithms (e.g., Crowell et al., 2018). 
+            The noise in GNSS data is greater than that in seismic data and many algorithms 
+            have been demonstrated for the detection of the onset of events using inertial recordings 
+            (Perol et al., 2018; Ross et al., 2018; Zhu & Beroza, 2019) so a system that relies 
+            on seismometers for triggering is still the most robust.
+            """
+
+
+    5.2 Real-time Earthquake Early Warning with Deep Learning: Application to 
+        the 2016 Central Apennines, Italy Earthquake Sequence (https://arxiv.org/pdf/2006.01332)
+
+        *  INVESTIGATE: 
+            """
+            First, we directly extract earthquake source parameters from 
+            continuous waveform streams without phase picking, which 
+            substantially decreases the response time for early warning. 
+            """
+
+
+        magnitude distribution of the training data is rather logarithimic with the peak at M2.5
+
+        * Quotes:
+            """
+            For onsite warning, predominant periods and/or amplitudes of 
+            the first few seconds of P waves at single stations are 
+            utilized to evaluate source magnitude or ground shaking (5-10s).
+            """
+
+            """
+            To comprehensively test the performance and robustness 
+            of our system, we symmetrically analyze 500 testing 
+            samples. To simulate real-time earthquake monitoring, we 
+            randomly cut waveforms of the 500 testing samples to form 
+            various time windows with different waveform lengths at 
+            one or multiple stations. The results show that early warning 
+            could be activated as early as 3–4 s after the first P phase if 
+            only one or two stations receive earthquake signals. As 
+            more data is received, the mean errors of epicentral location, 
+            depth, and magnitude decrease from 8.8 km, 2.6 km, and 
+            0.4 to 3.7 km, 1.5 km, and 0.24, respectively
+            """
+
+    5.3 **QUITE SIMILAR APPROACH TO WHAT I'M PLANNING TO DO**:
+        Explainable deep learning for real-time prediction of uniform hazard spectral acceleration for on-site earthquake early warning
+        (https://academic.oup.com/gji/article/243/2/ggaf345/8244655?login=false)
+
+
+        * Quotes:
+            """
+            Jozinović et al. (2020, 2021) proposed an automated raw data-driven approach based on 
+            a CNN architecture to predict ground motion intensity, including PGA, PGV and Sa 
+            at a few periods of 0.3, 1 and 3s, using the initial seconds of arriving ground motions 
+            (7, 10 or 15 s-long waveforms)
+            """
+
+            """
+            Accurate automatic picking of P-wave arrivals is essential. 
+            The ground motion recordings in the NGA-West2 data base do not begin with P-wave arrivals 
+            and may include additional zeros or early station noise. 
+            As a result, accurately picking the P waves in these ground motions is a critical step in developing the proposed DLUHS framework
+            """
+
+            """
+            The window lengths are defined as starting from the origin of the P-wave arrival and extending 3, 5 and 8 s afterward. 
+            This study automatically picks P-wave arrivals using the robust PPHASEPICKER algorithm developed by Kalkan (2016).
+            """
+
+        * Datasets:
+
+            NGA-West2 (developed by the Pacific Earthquake Engineering Research Center... Magnitude range of 3.4 to 7.9.)
+
+            The recorded ground motions used in this study can be obtained from the NGAWest2 data base 
+            and from the NIED K-NET, KiK-net and the National Research Institute for Earth Science and Disaster Resilience, 
+            U.S. Geological Survey (USGS) Earthquake Hazard Toolbox is accessible through dynamic NSHM Conterminous U.S. 2023 edition.
+
+
+    5.4 Expanding the Role of GNSS in Seismic Monitoring (https://insidegnss.com/expanding-the-role-of-gnss-in-seismic-modeling/)
+
+        Not a paper, but an artice and discusses how GNSS data can be used for seismic monitoring.
+
+        Imediately shows that for <M6.0 earthquakes GNSS is almost useless.
+
+
+        * Quotes:
+            """
+            Existing inertial and geodetic networks were largely built and continue to operate independently. 
+            Inclusion of both sensor types increases the density of ground motion observations. 
+            Such a densification is particularly valuable in relatively sparser regions [3], such as Alaska, 
+            but also adds redundancy and resilience to all existing overlapped networks.     
+            """
+
+            """
+            GNSS ambient position noise is predominantly the aggregate of timing effects of GNSS radio signal propagation through the atmosphere,
+            satellite and receiver oscillators and the antenna radio frequency environment. 
+            """
+
+    5.5 CRED: A Deep Residual Network of Convolutional and Recurrent Units for 
+        Earthquake Signal Detection (https://arxiv.org/pdf/1810.01965)Ж
+
+        **Solves the task by constructing a binary vector of 1 repesenting an earthquake and 0 otherwise as 
+        ground truth.**
+
+
+        * Quotes:
+            """
+            Inputs into the network are spectrograms of three component seismograms. Our previous 
+            studies (Mousavi et al. 2016a,b; Mousavi and Langston 2016a,b) showed that time-frequency 
+            transforms can improve event detection by better characterizing seismic signals
+            """
+
+            Regarding datasets
+            """
+            550,000 30-second 3-component seismograms recorded by 889 broadband and short-period 
+            stations in North California are used for the training of the network and its validation. 50% of 
+            these seismograms are associated with earthquakes occurring from January 1987 to December 
+            2017. The metadata used for the labeling P-wave and S-wave arrival times are manual picks 
+            provided by the Northern California Earthquake Data Center. Another half of the data set 
+            consists of seismic noise recorded by the same network stations. The noise samples contain a 
+            variety of ambient and non-ambient noises (Figure 7)
+            """
+
+            """
+            We process one month of continuous data recorded at station WHAR during August 2010. 
+            This is the common station used in these studies
+            """
+
+
+    5.6 Ai-Powered Based Real Time Earthquake Early Warning System Using Deep Learning 
+
+
+    (Local file: Lalithavani2752025JERR136675.pdf):
+
+
+        Made by Indian authors.
+
+        Basically, just an overview of what EEW is, some terminology on DL things (CNN, RNN, LSTM, metrics, act. functions and etc.)
+        proposes a CNN+MLP model for binary classification (earthquake or not).
+
+        
+    5.7 Reliable Real-time Seismic Signal/Noise Discrimination with Machine Learning  
+
+        Basically a system to test wherther oscillations are noise or not.
+        Tests 5 different classifiers: 
+            1) Fully Connected Neural Network
+            2) Recurrent Neural Network 
+            3) RNN with Attention
+            4) Convolutional Neural Network
+            5) GAN + Random Forest
+
+        CNN is 100x less fp and inference time is the same
+
+
+    5.8 A Machine-Learning Approach for Earthquake Magnitude Estimation (https://arxiv.org/pdf/1911.05975)
+        GitHub: https://github.com/smousavi05/MagNet
+
+        If i'm not mistake, same architecture was already used (3 components -> CNN -> Bi-LSTM -> MLP)
+
+        not the best results honestly and the magnitudes processed are barely above 3.0 
+        with the majority of them concentrated between 0.5 - 2.0
+
+    5.9 A NOVEL APPROACH FOR EARTHQUAKE EARLY WARNING SYSTEM DESIGN USING DEEP LEARNING TECHNIQUES (https://arxiv.org/pdf/2101.06517)
+
+        * Architecture: 
+            MFCC -> CNN -> LSTM -> MLP
+        
+        Compares graphs of earthquake's MFCC and noise's MFCC
+        Again, classification task is being solved (P-wave, S-wave, Noise)
+        And again, the whole waveform is used as input (Why I have no idea honestly)
+
+        But, what is interesting is that they eventually decided to deep dive into the hardware, 
+        which is praiseworthy.
+
+
+    5.10 Seismic Signal Denoising and Decomposition Using Deep Neural Networks (https://arxiv.org/pdf/1811.02695)
+
+        U-net like architecture 
+
+        to show the effectiveness of the method they run STA/LTA on both noisy and denoised signals
+        showing that STA/LTA on denoised signals is way more definite.
+
+        * Quotes:
+            """
+            The inputs to the first layer are the imaginary and real parts
+            of the time-frequency coefficients of the data, Y (t,f). In the
+            last layer masks of signal and noise (MS(t,f) and MN(t,f))
+            are provided as labels for training.
+            """
+
+    5.11 THE TRANSFORMER EARTHQUAKE ALERTING MODEL: A NEW VERSATILE APPROACH TO EARTHQUAKE EARLY WARNING 
+    (https://arxiv.org/pdf/2009.06316)    
+
+        Uses CNN + transformer as a base with raw waveform as input and PGA (Peak Ground Acceleration) PDF 
+        as an output
+        
+
+    5.12 Aglobal-scale database of seismic phases from cloud-based picking at petabyte scale 
+    (https://arxiv.org/pdf/2505.18874)
+
+
+        Basically a dataset with lots of data around the world
+        
+
+    5.13 Generalized Neural Networks for Real-Time Earthquake Early Warning (https://arxiv.org/pdf/2312.15218)
+
+
+        Uses 3-component waveforms as an input to Fully Convolutional Network and predicts magnitude's PDF
+
+        * Data:
+
+            """
+            International Federation of Digital Seismograph Networks (FDSN) web services from
+            institutions such as Italy’s National Institute of Geophysics and Volcanology (INGV), Northern
+            California Earthquake Data Center (NCEDC), Southern California Earthquake Data Center
+            (SCEDC)
+            """
+
+            """
+            Seismic data in Japan were downloaded from NIED Hi-net operated by National
+            Research Institute for Earth Science and Disaster Resilience. The earthquake catalog used in this
+            study can be downloaded from http://cnt.rm.ingv.it/
+            """
+
+            Also can be found there: 
+            
+                https://earthquake.usgs.gov/earthquakes/search/ 
+
+                https://www.data.jma.go.jp/eqev/data/bulletin/index_e.html
+
+                
+
+    **Most of the papers use the whole waveform as input (both P and S waves), which is not really sustainable for real-time estimation 
+    as for EEW it is preferred to estimate the magnitude as soon as possible.**
+
+    **I need to put attention to synthetically generated data for large earthquakes (M5.0+)**
+
+    **Spectogram as a some kind of denoiser and feature extractor, 
+    also need to test on "overly saturated" data (M7.0+)**
+
+6. Things to mention:
+
+    Mel spectrograms vs MFCC (fourier transform, filterin and etc.) -> compares both: https://arxiv.org/pdf/1706.07156
+    CNNs, MLPs
+    Convergence and optimization task (Gradient Descent, Backpropagation, Loss functions)
+    Regularization techniques (Dropout)
+    Metrics, their difference and importance of the difference (Accuracy, precision, recall, beta score and etc.)
+    Class disbalance and its implications (underlearning data distribution)
+    Possible MLE (maximum likelihood estimation) in case of synthetic data generation   
+    
+7. Data:
+
+    Центрально-Азиатский Институт прикладных Исследований Земли (ЦАИИЗ)
+    Central-Asian Institute for Applied Geosciences (CAIAG):
+
+        Институт предоставляет доступ к данным сейсмических станций в Кыргызстане в открытом доступе.
+
+            Система хранения сенсорных данных (SDSS):
+                https://www.caiag.kg/ru/nauchnaya-infrastruktura/informatsionnye-sistemy/sdss
+            
+            База сейсмических данных:
+                https://www.caiag.kg/ru/nauchnaya-infrastruktura/informatsionnye-sistemy/bazy-sejsmicheskikh-dannykh
+        
+        
+
+    Open sourced:
+
+        Not quite sure what this is, but it mentions Pamir, which is related to Kyrgyzstan's territory:
+            https://www.sciencebase.gov/catalog/item/5aa40985e4b0b1c392eaaeee
+
+        
+8. Current situation in Kyrgyzstan:
+
+    for now **PRESTo** is used - https://www.prestoews.org/about.php:
+
+        It uses Bayesian magnitude estimation
+
+        paper 2015 (4$ to read for 6 hours): https://www.cell.com/trends/cognitive-sciences/abstract/S1364-6613(15)00050-9?cc=y
+        paper 2008 (FREE): https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2007JB005386
+        paper 2021 (FREE): https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2020JB020359
