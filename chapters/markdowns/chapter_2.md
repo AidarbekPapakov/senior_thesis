@@ -2,33 +2,32 @@
 
 ## 2.1 Fundamentals of Seismology
 
-Understanding earthquake early warning systems requires a brief overview of the physical processes underlying seismic events and the signals recorded by monitoring stations.
+Before diving into the proposed method and to have a grasp understanding of what is going to be discussed, we are going to get familiar with several terms related to seismology.
 
 ### 2.1.1 Earthquake Generation
 
-Earthquakes occur due to the sudden release of accumulated elastic strain energy within the Earth's crust. Tectonic stresses gradually deform rocks along geological faults until the stress exceeds the frictional resistance preventing slip. At that point, rapid rupture propagates along the fault plane, releasing stored energy in the form of seismic waves.
+Essentially, earthquakes are the result of sudden release of accumulated strain energy inside of the Earth's crust. Tectonic stresses gradually deform rocks along geological faults until the stress exceeds the frictional resistance preventing slip. By that time, rapid rupture propagates along the fault plane, releasing the energy storen in the form of seismic waves.
 
-The point inside the Earth where rupture initiates is called the **hypocenter** (or focus), while the projection of this point onto the Earth's surface is called the **epicenter**. The rupture process typically propagates along the fault plane over several seconds or longer, depending on the size of the earthquake.
+The location inside the Earth where the rupture itself starts is called the **hypocenter** (or focus), whereas the projection of this point onto the Earth's surface is called the **epicenter**. Depending on the size of the earthquake, the rupture process might propagate along the fault plane over several seconds or even longer.
 
-Earthquake sequences often consist of several stages. The main rupture event is referred to as the **mainshock**, while smaller earthquakes occurring before and after it are known as **foreshocks** and **aftershocks**, respectively. These events reflect the redistribution of stress within the surrounding crust.
+Earthquakes might consist of several stages. The main event is called the **mainshock**, smaller earthquakes occurring before and after it are known as **foreshocks** and **aftershocks**, respectively.
 
 ### 2.1.2 Seismic Wave Types
 
-When an earthquake occurs, several types of seismic waves propagate through the Earth's interior and along its surface.
+There are several distinguishable types of waves considered, the primary two are:
 
-The two primary body waves are **P-waves** (primary waves) and **S-waves** (secondary waves).
+**P-waves** (primary waves) and **S-waves** (secondary waves).
 
-P-waves are compressional waves that propagate by alternately compressing and expanding the material through which they travel. Because they involve particle motion parallel to the direction of propagation, P-waves can travel through both solid and fluid materials. Their velocities typically range from approximately 5 to 8 km/s in the Earth's crust.
+P-waves are faster, meaninig they're are first to reach the Earth's surface, despite that, they are not as desctructive and dangerous as the S-waves.
+The velocity of P-waves might range approximately from 5 to 8 km/s in the Earth's crust.
 
-S-waves, in contrast, are shear waves that involve particle motion perpendicular to the direction of propagation. These waves cannot propagate through fluids and travel more slowly than P-waves, typically at velocities of 3 to 4 km/s.
+On the other hand, S-waves travel notably slower than P-waves, carrying more threat due to their more destructive nature. Their velocity might range from 3 to 4 km/s.
 
-This difference in velocity forms the physical basis of earthquake early warning systems. Since P-waves arrive before the more destructive S-waves, the detection of the first P-wave arrivals provides a small time window in which warnings can be issued before strong shaking begins.
-
-In addition to body waves, earthquakes also generate **surface waves**, which travel along the Earth's surface and often produce the largest ground displacements responsible for structural damage.
+And this difference in velocities lays the ground for most early warning systems deployed around the world. The small window allows for issuing a warning before the destructive waves reach the vulnerable areas.
 
 ### 2.1.3 Earthquake Magnitude and Intensity
 
-The size of an earthquake is quantified using several magnitude scales. Historically, the Richter magnitude scale was used to estimate earthquake size based on the logarithm of the maximum amplitude recorded by a seismograph. However, this scale saturates for large earthquakes and is no longer widely used for scientific analysis.
+The scale of an earthquake can be measured in several ways. Historically, the Richter magnitude scale was used to estimate earthquake size based on the logarithm of the maximum amplitude recorded by a seismograph. However, this scale saturates for large earthquakes and is no longer widely used for scientific analysis.
 
 Modern seismology instead relies on the **moment magnitude scale** $M_w$, which is derived from the seismic moment:
 
@@ -44,11 +43,11 @@ The moment magnitude is then defined as:
 
 $$M_w = \frac{2}{3} \log_{10}(M_0) - 6.07$$
 
-This scale provides a consistent measure of earthquake size across a wide range of magnitudes.
+This provides a consistent measure of earthquake scale across a range of magnitudes.
 
-It is important to distinguish magnitude from **intensity**, which measures the severity of ground shaking at a particular location. One commonly used intensity scale is the Modified Mercalli Intensity (MMI) scale, which ranges from I (not felt) to XII (complete destruction). Intensity varies with distance from the epicenter and local geological conditions.
+It is also important to distinguish magnitude from **intensity**, which measures how severe ground shaking is at a certain place. Modified Mercalli Intensity (MMI) scale is one of the ways how to measure intensity. It ranges from I (not felt) to XII (complete destruction).
 
-Earthquake early warning systems typically attempt to estimate earthquake magnitude and location in order to predict expected ground motion intensity at various locations.
+Due to the fact that intensity is highly dependent on the place location, ground soil and stability, early warning systems usually try to estimate earthquake magnitude and location.
 
 ## 2.2 Classical Earthquake Early Warning Systems
 
