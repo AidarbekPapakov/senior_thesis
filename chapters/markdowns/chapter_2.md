@@ -106,67 +106,38 @@ With the exponential development of deep learning over the past decade, research
 
 Several representative systems are reviewed below.
 
-### 2.4.1 PhaseNet
+### 2.4.1 Machine Learning advances and achievements
 
-PhaseNet is a deep neural network designed for automatic detection of P-wave and S-wave arrivals. The architecture is based on a convolutional encoder–decoder structure similar to the U-Net architecture widely used in image segmentation.
+Several studies have been moving towards this direction, but the one to stand out among the others is the one that introduced **PhaseNet**, a deep neural network designed for automatic detection of P-wave and S-wave arrivals. The architecture is based on a convolutional encoder–decoder structure similar to the U-Net architecture widely used in image segmentation.
 
 Instead of relying on manually designed signal features, PhaseNet processes raw seismic waveforms and learns representations directly from labeled training data. The network produces probability estimates for P-wave and S-wave arrivals at each time step.
 
-PhaseNet outperformed traditional STA/LTA-based methods in both detection accuracy and robustness to noise. 
+PhaseNet has shown to outperform traditional STA/LTA-based methods in both detection accuracy and robustness to noise. 
 
 PhaseNet represents a common trend in seismology: replacing manually engineered signal processing pipelines with data-driven models capable of learning complex patterns in seismic signals.
 
-### 2.4.2 CRED: Convolutional Recurrent Earthquake Detector
+Another similar work, is the **CRED** system, which represents another deep learning approach for earthquake detection. In contrast to models operating directly on waveforms, CRED uses spectrograms of three-component seismic observations.
 
-The CRED system represents another deep learning approach for earthquake detection. In contrast to models operating directly on waveforms, CRED uses spectrogram representations derived from three-component seismic recordings.
+The network itself is composed of CNNs and RNNs, from the premise of spectrograms being a verbose spatial-temporal representaion of seismic waves. The system is then trained to solve the problem of binary classification that outputs a vector of binary values, with 1 representing an earthquake and 0 the absence of earthquake. Training is performed on a large dataset of labeled seismic events and noise recordings.
 
-The network architecture combines convolutional layers with recurrent layers, enabling it to capture both spectral patterns and temporal dependencies in the data.
+This particular work shares a lot with what we have done, but the task solved is essentially different from what we have set to accomplish because the task of binary classification is significantly easier than estimating a scalar value.
 
-The system is trained as a binary classifier that outputs a vector of binary values, with 1 representing an earthquake and 0 the absence of earthquake. Training is performed on a large dataset of labeled seismic events and noise recordings.
-
-This particular work shares a lot with what we have done, but the task solved is significantly different from what we have set to accomplish as the task of binary classification is much easier that estimating a scalar value.
-
-Also, CRED misses on the details, omitting the estimation of important parameters, basically answering yes/no question.
-
-
-### 2.4.3 M-LARGE
-
-M-LARGE is one the systems that utilizes the data received from GNSS sensors that we have discussed before, thus, concluded by the authors themselves, is practically useless to the low to meduium eartquakes, that are the biggest of all earthquakes.
+**M-LARGE** is one the systems that utilizes the data received from GNSS sensors that we have discussed before, thus, concluded by the authors themselves, is practically useless to the low to meduium eartquakes, that are the biggest of all earthquakes.
 
 Nevertheless, the proposed model performed exceptionnally well on synthetically generated high-magnitude data, which still indicate the fact that deep learning models might excell at capturing complex patterns in seismic data.
 
-
-### 2.4.4 Direct Parameter Estimation from Waveforms
-
 Another direction of research focuses on directly earthquake parameters based on raw waveform data without explicitly preprocessing the signals.
 
-Multiple approaches have been utilized in that regard. Concatinating three-component waveforms into a one matrix and passing it to CNNs, Using a single waveforms and passing it to RNNs.
+Multiple approaches have been utilized in that regard. Some researchers concatenated three-component waveforms into a one matrix and passed it to CNNs, other used a single waveform as the input to RNN-based architecture.
 
-These studies try to make these models learn the relevant features from the raw data itself.
+Such studies try to make these models learn the relevant features from the raw data itself.
 
+Another advance, motiavted by the architectures that dominated in the tasks of Computer Vision and Natural Language processing, is attention-based architectures.
+The Transformer Earthquake Alerting Model (TEAM) combines convolutional layers with transformer-based attention mechanisms to estimate probability distributions of peak ground acceleration (PGA). Transformers allow the model to capture long-range temporal dependencies within seismic waveforms. Although these models demonstrate promising performance, their computational complexity can pose challenges for real-time deployment in EEW systems.
 
-### 2.4.5 Transformer-Based EEW Models
+Several models have been proposed specifically for earthquake magnitude estimation. For example, the **MagNet** estimates earthquake magnitude from seismic waveforms. While the model demonstrates reasonable performance for small earthquakes (0.5-2.0M), its accuracy tends to decrease significantly for larger events due to limited training data skewed to lower bounds of earthquake's magnitude.
 
-More recently, attention-based architectures have been explored for seismic monitoring tasks.
-
-The Transformer Earthquake Alerting Model (TEAM) combines convolutional layers with transformer-based attention mechanisms to estimate probability distributions of peak ground acceleration (PGA). Transformers allow the model to capture long-range temporal dependencies within seismic waveforms.
-
-Although these models demonstrate promising performance, their computational complexity can pose challenges for real-time deployment in EEW systems.
-
-### 2.4.6 Magnitude Estimation Networks
-
-Several neural network models have been proposed specifically for earthquake magnitude estimation.
-
-For example, the MagNet architecture uses deep learning to estimate earthquake magnitude from seismic waveforms. While the model demonstrates reasonable performance for small earthquakes (0.5-2.0M), its accuracy tends to decrease significantly for larger events due to limited training data at medium to high magnitudes.
-
-### 2.4.7 Seismic Signal Denoising
-
-Another way deep learning has found its place in is signal denoising.
-
-Weiqiang Zhu and  S. Mostafa Mousavi adapted the U-net like architecture
-to build a model that would successfully remove the noise from the incoming signals. 
-
-The definitive metric of their was the increased performance of STA/LTA method, which have reproached for being sensitive to noise.
+Another way deep learning has found its place in is signal denoising. Weiqiang Zhu and  S. Mostafa Mousavi adapted the U-net like architecture to build a model that successfully manages to remove the noise from the incoming signals. The extrincic metric of their was the increased performance of STA/LTA method applied to denosed signals over the original waveform. 
 
 ## 2.5 Limitations of Existing Approaches
 
@@ -180,7 +151,7 @@ Although, some of the mentioned works have tried utilizing synthetically generat
 
 **Underutilization of Signal Processing** - Most proposed architectures rely solely on raw inputs instead of utilizing widely known signal processing transformations, such as Mel Frequency Cepstral Coefficients (MFCCs) and Spectograms.
 
-## 2.7 Research Gap
+## 2.6 Research Gap
 
 Despite illustrating the broad appication of machine learning techniques in seismology, the literature reviewed suggests several opportunities for further research.
 
@@ -190,7 +161,7 @@ Second, many architectures either miss out on spatial representations or tempora
 
 Finally, the scarcity of high-magnitude training data remains a major challenge. Techniques such as synthetic data generation and targeted sampling strategies might help mitigate this limitation.
 
-## 2.8 Summary
+## 2.7 Summary
 
 This chapter reviewed the physical principles underlying earthquake generation and seismic wave propagation, as well as the traditional methods used in earthquake early warning systems.
 
