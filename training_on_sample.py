@@ -14,6 +14,12 @@ import torch.nn as nn
 from scipy.signal import ShortTimeFFT
 from scipy.signal.windows import hann
 from torch.utils.data import DataLoader, Dataset
+from torchmetrics.regression import (
+    MeanAbsolutePercentageError,
+    PearsonCorrCoef,
+    R2Score,
+    SpearmanCorrCoef,
+)
 from tqdm import tqdm
 
 logger = logging.getLogger(name='Seismic-Magnitude-training')
@@ -63,10 +69,21 @@ class INSTANCESeismicDataset(Dataset):
         # STFT Parameters
         self.fs = 100
         self.N = 128
-        self.overlap = 0.90
+        self.overlap = 0.70
         self.hop_size = int(self.N * (1 - self.overlap)) 
         self.win = hann(self.N, sym=True)
         self.SFT = ShortTimeFFT(self.win, hop=self.hop_size, fs=self.fs, scale_to='magnitude')
+
+    def get_stft_params(self) -> Dict[str, Any]:
+        """Expose STFT config for external logging."""
+        return {
+            'stft_fs': self.fs,
+            'stft_window_size_N': self.N,
+            'stft_overlap': self.overlap,
+            'stft_hop_size': self.hop_size,
+            'stft_window_type': 'hann',
+            'stft_scale_to': 'magnitude',
+        }
 
     def __len__(self) -> int:
         return len(self.metadata)
@@ -99,7 +116,7 @@ class SeismicCNNBackbone(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.conv_block = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=(5, 3), padding=(2, 1)),
+            nn.Conv2d(3, 16, kernel_size=(5, 3), padding=(2, 1)),  # 3 channels in
             nn.BatchNorm2d(16),
             nn.GELU(),
             nn.MaxPool2d(kernel_size=(2, 1)), 
@@ -121,35 +138,25 @@ class SeismicCNNBackbone(nn.Module):
 class SeismicMagnitudePredictor(nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        self.cnn_E = SeismicCNNBackbone()
-        self.cnn_N = SeismicCNNBackbone()
-        self.cnn_Z = SeismicCNNBackbone()
+        self.cnn = SeismicCNNBackbone()
 
-        self.lstm = nn.LSTM(input_size=64 * 3, hidden_size=128, num_layers=2, batch_first=True, dropout=0.2)
+        self.lstm = nn.LSTM(input_size=64, hidden_size=64, num_layers=1, batch_first=True)
 
         self.mlp = nn.Sequential(
-            nn.Linear(128, 64),
+            nn.Linear(64, 64),
             nn.GELU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.4),
             nn.Linear(64, 1) 
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x_E = x[:, 0, :, :].unsqueeze(1)
-        x_N = x[:, 1, :, :].unsqueeze(1)
-        x_Z = x[:, 2, :, :].unsqueeze(1)
-
-        feat_E = self.cnn_E(x_E) 
-        feat_N = self.cnn_N(x_N) 
-        feat_Z = self.cnn_Z(x_Z) 
-
-        combined_feats = torch.cat((feat_E, feat_N, feat_Z), dim=1)
-        lstm_input = combined_feats.permute(0, 2, 1)
+        feats = self.cnn(x) # (batch, 64, 16)
+        lstm_input = feats.permute(0, 2, 1) # (batch, 16, 64)
 
         lstm_out, _ = self.lstm(lstm_input)
-        last_time_step = lstm_out[:, -1, :] 
+        last_time_step = lstm_out[:, -1, :] # (batch, 64)
 
-        magnitude_pred = self.mlp(last_time_step) 
+        magnitude_pred = self.mlp(last_time_step)   # (batch, 1)
         return magnitude_pred
 
 
@@ -176,9 +183,10 @@ def run_experiment(
     elif scheduler_alg == 'exp' and exp_lr_scheduler is None:
         raise ValueError('`scheduler_alg` is exp, but `exp_lr_scheduler` left unspecified.')
     elif scheduler_alg not in implemented_scheduler_algs and scheduler_alg is not None:
-        raise NotImplementedError(f'`scheduler_alg` expected {implemented_scheduler_algs}, got `{scheduler_alg}`')
+        raise NotImplementedError(
+            f'`scheduler_alg` expected {implemented_scheduler_algs}, got `{scheduler_alg}`'
+        )
 
-    # Track dates for better file organization in the file system
     yyyy, mm, dd = (
         str(datetime.today().year),
         str(datetime.today().month),
@@ -189,12 +197,15 @@ def run_experiment(
     dir2save: str = 'saved_models/'
     result_dir: str = f'./training_results/{yyyy}_{mm}_{dd}/{experiment_name}'
     viz_file_name: str = 'training_metrics.jpg'
+    extra_metrics_file_name: str = 'regression_metrics.jpg'
     hyperparam_filename: str = 'hyperparams.json'
 
     os.makedirs(result_dir, exist_ok=True)
 
     todays_experiments: List[str] = sorted([f for f in os.listdir(result_dir) if 'run_' in f])
-    current_experiment: str = (str(int(todays_experiments[-1].split('_')[-1]) + 1) if todays_experiments else '1')  
+    current_experiment: str = (
+        str(int(todays_experiments[-1].split('_')[-1]) + 1) if todays_experiments else '1'
+    )
     current_experiment_dir: str = os.path.join(result_dir, f'run_{current_experiment}')
 
     os.makedirs(current_experiment_dir, exist_ok=False)
@@ -212,9 +223,15 @@ def run_experiment(
         val_dataset = INSTANCESeismicDataset(
             csv_path, hdf5_path, target_length, pad_length, phase='val', train_size=train_size
         )
+        
+        stft_params: Dict[str, Any] = train_dataset.get_stft_params()
 
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=True)
-        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+        train_loader = DataLoader(
+            train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=True
+        )
+        val_loader = DataLoader(
+            val_dataset, batch_size=batch_size, shuffle=False, num_workers=0
+        )
 
         if loss_function == 'MSE':
             criterion = nn.MSELoss()
@@ -224,8 +241,15 @@ def run_experiment(
             raise NotImplementedError(
                 'Loss function is expected to be one of the following:\n["MSE", "HuberLoss"]\n'
                 f'but got "{loss_function}"'
-                )
+            )
+
         mae_metric = nn.L1Loss() # Used to track absolute error (interpretability)
+
+        # Extra metrics on val only to look at the results from different perspective of sort
+        mape_metric = MeanAbsolutePercentageError().to(device)
+        r2_metric = R2Score().to(device)
+        pearson_metric = PearsonCorrCoef().to(device)
+        spearman_metric = SpearmanCorrCoef().to(device)
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -237,7 +261,9 @@ def run_experiment(
             lr_scheduler_name = 'ExponentialLR'
             lr_scheduler_param = exp_lr_scheduler
         elif scheduler_alg == 'cos':
-            lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=cos_eta_min)
+            lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=epochs, eta_min=cos_eta_min
+            )
             lr_scheduler_name = 'CosineAnnealingLR'
             lr_scheduler_param = {'T_max': epochs, 'eta_min': cos_eta_min}
 
@@ -253,6 +279,7 @@ def run_experiment(
             'loss_fn': loss_function,
             'lr_scheduler': lr_scheduler_name,
             'lr_scheduler_param': lr_scheduler_param,
+            **stft_params,  # STFT params logged here
         }
 
         train_losses: List[float] = []
@@ -260,8 +287,13 @@ def run_experiment(
         train_MAEs: List[float] = []
         val_MAEs: List[float] = []
 
-        # For regression, we want the LOWEST possible error
-        best_val_mae: float = float('inf') 
+        # Extra metric progressions (val only)
+        val_MAPEs: List[float] = []
+        val_R2s: List[float] = []
+        val_Pearsons: List[float] = []
+        val_Spearmans: List[float] = []
+
+        best_val_mae: float = float('inf')
         no_progress_epochs: int = 0
 
         for epoch in range(epochs):
@@ -300,6 +332,10 @@ def run_experiment(
             val_loss: float = 0.0
             val_mae: float = 0.0
 
+            # Collect all preds & targets for epoch metric computation
+            all_preds: List[torch.Tensor] = []
+            all_targets: List[torch.Tensor] = []
+
             val_progression_bar = tqdm(val_loader, desc='Validation')
 
             with torch.inference_mode():
@@ -314,20 +350,43 @@ def run_experiment(
                     val_loss += loss.item()
                     val_mae += mae.item()
 
+                    # Flatten to 1D for torchmetrics
+                    all_preds.append(outputs.squeeze(1))
+                    all_targets.append(targets.squeeze(1))
+
             val_losses.append(val_loss / len(val_loader))
             val_MAEs.append(val_mae / len(val_loader))
             print(f'Val MSE: {val_losses[-1]:.4f}, Val MAE: {val_MAEs[-1]:.4f}')
 
-            # Save best model logic based on MAE
+            # Compute extra metrics over the full val set
+            epoch_preds = torch.cat(all_preds)    # (N,)
+            epoch_targets = torch.cat(all_targets) # (N,)
+
+            val_MAPEs.append(mape_metric(epoch_preds, epoch_targets).item())
+            val_R2s.append(r2_metric(epoch_preds, epoch_targets).item())
+            val_Pearsons.append(pearson_metric(epoch_preds, epoch_targets).item())
+            val_Spearmans.append(spearman_metric(epoch_preds, epoch_targets).item())
+
+            print(
+                f'Val MAPE: {val_MAPEs[-1]:.4f} | R²: {val_R2s[-1]:.4f} | '
+                f'Pearson: {val_Pearsons[-1]:.4f} | Spearman: {val_Spearmans[-1]:.4f}'
+            )
+
             if val_MAEs[-1] < best_val_mae:
                 best_val_mae = val_MAEs[-1]
-                print(f'Found new best model @{epoch+1} epoch with Val MAE: {best_val_mae:.3f}.\nSaving to `{models_dir}`...')
+                print(
+                    f'Found new best model @{epoch + 1} epoch with Val MAE: {best_val_mae:.3f}.\n'
+                    f'Saving to `{models_dir}`...'
+                )
                 torch.save(model.state_dict(), os.path.join(models_dir, 'best_model.pth'))
-                no_progress_epochs = 0  
+                no_progress_epochs = 0
             else:
                 no_progress_epochs += 1
                 if no_progress_epochs >= no_progress_crash_out:
-                    print(f'No progress in validation MAE for {no_progress_epochs} epochs. Stopping training loop...')
+                    print(
+                        f'No progress in validation MAE for {no_progress_epochs} epochs. '
+                        'Stopping training loop...'
+                    )
                     break
 
         print('\nTraining complete.')
@@ -339,54 +398,83 @@ def run_experiment(
             'train_MAEs': train_MAEs,
             'val_losses': val_losses,
             'val_MAEs': val_MAEs,
+            'val_MAPEs': val_MAPEs,
+            'val_R2s': val_R2s,
+            'val_Pearsons': val_Pearsons,
+            'val_Spearmans': val_Spearmans,
         }
 
-        return (training_metrics, hyperparams)
+        return training_metrics, hyperparams, stft_params
 
     # Trigger training
-    training_results, hyperparams = train_model()
+    training_results, hyperparams, stft_params = train_model()
 
-    # Updated hyperparams with train results
     hyperparams.update(training_results)
 
-    # Save config
-    with open((json_file_name := os.path.join(current_experiment_dir, hyperparam_filename)), 'w') as f:
+    # Save config & metrics
+    with open(os.path.join(current_experiment_dir, hyperparam_filename), 'w') as f:
         json.dump(obj=hyperparams, fp=f, indent=4)
 
     # Plot metrics
     fig, axes = plt.subplots(2, 2, figsize=(12, 10), dpi=200)
 
-    # Train plots
-    axes[0][0].plot(np.arange(len(training_results['train_losses'])), training_results['train_losses'], color=(0, 0.2, 1))
-    axes[1][0].plot(np.arange(len(training_results['train_MAEs'])), training_results['train_MAEs'], color=(0, 0.2, 1))
-
+    axes[0][0].plot(training_results['train_losses'], color=(0, 0.2, 1))
+    axes[1][0].plot(training_results['train_MAEs'], color=(0, 0.2, 1))
     axes[0][0].set_title('Train MSE Loss progression')
     axes[1][0].set_title('Train MAE progression')
     axes[0][0].set_ylim(bottom=0.0)
     axes[1][0].set_ylim(bottom=0.0)
-
     axes[0][0].set_xlabel('Epochs')
     axes[1][0].set_xlabel('Epochs')
     axes[0][0].set_ylabel('MSE Loss')
     axes[1][0].set_ylabel('MAE')
 
-    # Val plots
-    axes[0][1].plot(np.arange(len(training_results['val_losses'])), training_results['val_losses'], color=(1, 0.5, 0))
-    axes[1][1].plot(np.arange(len(training_results['val_MAEs'])), training_results['val_MAEs'], color=(1, 0.5, 0))
-
+    axes[0][1].plot(training_results['val_losses'], color=(1, 0.5, 0))
+    axes[1][1].plot(training_results['val_MAEs'], color=(1, 0.5, 0))
     axes[0][1].set_title('Val MSE Loss progression')
     axes[1][1].set_title('Val MAE progression')
     axes[0][1].set_ylim(bottom=0.0)
     axes[1][1].set_ylim(bottom=0.0)
-
     axes[0][1].set_xlabel('Epochs')
     axes[1][1].set_xlabel('Epochs')
     axes[0][1].set_ylabel('MSE Loss')
     axes[1][1].set_ylabel('MAE')
 
-    file_name_full_path: str = os.path.join(current_experiment_dir, viz_file_name)
-    plt.savefig(file_name_full_path)
+    plt.tight_layout()
+    plt.savefig(os.path.join(current_experiment_dir, viz_file_name))
     plt.close(fig)
+
+    epochs_range = np.arange(len(training_results['val_MAPEs']))
+
+    fig2, axes2 = plt.subplots(2, 2, figsize=(12, 10), dpi=200)
+    purple = (0.5, 0.0, 0.8)
+    green  = (0.0, 0.6, 0.3)
+
+    axes2[0][0].plot(epochs_range, training_results['val_MAPEs'], color=purple)
+    axes2[0][0].set_title('Val MAPE progression')
+    axes2[0][0].set_xlabel('Epochs')
+    axes2[0][0].set_ylabel('MAPE')
+    axes2[0][0].set_ylim(bottom=0.0)
+
+    axes2[0][1].plot(epochs_range, training_results['val_R2s'], color=green)
+    axes2[0][1].set_title('Val R² progression')
+    axes2[0][1].set_xlabel('Epochs')
+    axes2[0][1].set_ylabel('R²')
+
+    axes2[1][0].plot(epochs_range, training_results['val_Pearsons'], color=purple)
+    axes2[1][0].set_title('Val Pearson Correlation progression')
+    axes2[1][0].set_xlabel('Epochs')
+    axes2[1][0].set_ylabel('Pearson r')
+
+    axes2[1][1].plot(epochs_range, training_results['val_Spearmans'], color=green)
+    axes2[1][1].set_title('Val Spearman Correlation progression')
+    axes2[1][1].set_xlabel('Epochs')
+    axes2[1][1].set_ylabel('Spearman ρ')
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(current_experiment_dir, extra_metrics_file_name))
+    plt.close(fig2)
+
 
 if __name__ == "__main__":
     
@@ -408,7 +496,7 @@ if __name__ == "__main__":
             experiment_name=f'magnitude_pred_{length}_samples',
             target_length=length,
             pad_length=pad_needed,
-            batch_size=64,
+            batch_size=128,
             lr=1e-3,
             train_size=0.8,
             scheduler_alg='cos',
