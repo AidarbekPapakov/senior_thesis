@@ -160,6 +160,7 @@ def run_experiment(
     target_length: int = 300,
     pad_length: int = 700,
     batch_size: int = 64,
+    loss_function: Literal['MSE', 'HuberLoss'] = 'MSE',
     lr: float = 1e-3,
     weight_decay: float = 1e-5,
     train_size: float = 0.75,
@@ -215,7 +216,15 @@ def run_experiment(
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=True)
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
-        criterion = nn.MSELoss() 
+        if loss_function == 'MSE':
+            criterion = nn.MSELoss()
+        elif loss_function == 'HuberLoss':  
+            criterion = nn.HuberLoss()
+        else:
+            raise NotImplementedError(
+                'Loss function is expected to be one of the following:\n["MSE", "HuberLoss"]\n'
+                f'but got "{loss_function}"'
+                )
         mae_metric = nn.L1Loss() # Used to track absolute error (interpretability)
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
@@ -241,7 +250,7 @@ def run_experiment(
             'train_size': train_size,
             'target_length': target_length,
             'pad_length': pad_length,
-            'loss_fn': 'MSELoss',
+            'loss_fn': loss_function,
             'lr_scheduler': lr_scheduler_name,
             'lr_scheduler_param': lr_scheduler_param,
         }
