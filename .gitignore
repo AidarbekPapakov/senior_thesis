@@ -1,5 +1,6 @@
 __pycache__/
 datasets/
 saved_models/
+*.log
 *.pth
 *.pt
