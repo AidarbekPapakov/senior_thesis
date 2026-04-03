@@ -72,8 +72,6 @@ class INSTANCESeismicDataset(Dataset):
         self.N = 128
         self.overlap = 0.70
         self.hop_size = int(self.N * (1 - self.overlap)) 
-        self.win = hann(self.N, sym=True)
-        self.SFT = ShortTimeFFT(self.win, hop=self.hop_size, fs=self.fs, scale_to='magnitude')
 
     def get_stft_params(self) -> Dict[str, Any]:
         """Expose STFT config for external logging."""
@@ -498,7 +496,11 @@ if __name__ == "__main__":
     hdf5_file: str = "/mnt/d/Downloads/Senior_Thesis/INSTANCE/Instance_sample_dataset_v3/data/Instance_events_counts_10k.hdf5"
     
     # We test the 3-second, 5-second, and 8-second extraction here
-    target_lengths: List[int] = [300, 500, 800] 
+    target_lengths: List[int] = [
+        # 300, 
+        # 500, 
+        800
+    ] 
     
     for length in target_lengths:
         print(f"\n{'='*50}\nRunning experiment for {length/100:.1f}s P-wave interval\n{'='*50}")
@@ -512,7 +514,7 @@ if __name__ == "__main__":
             experiment_name=f'magnitude_pred_{length}_samples',
             target_length=length,
             pad_length=pad_needed,
-            batch_size=128,
+            batch_size=512,
             lr=1e-3,
             train_size=0.8,
             scheduler_alg='cos',
