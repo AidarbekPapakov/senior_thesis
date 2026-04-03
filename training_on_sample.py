@@ -96,8 +96,12 @@ class INSTANCESeismicDataset(Dataset):
         # Target variable
         magnitude = torch.tensor([row['source_magnitude']], dtype=torch.float32)
 
-        with h5py.File(self.hdf5_path, 'r') as h5:
-            waveform = h5['data'][trace_name][:] 
+        self.h5_file = None
+
+        if self.h5_file is None:
+            self.h5_file = h5py.File(self.hdf5_path, 'r')
+
+        waveform = self.h5_file['data'][trace_name][:]    
 
         p_wave_clip = waveform[:, p_idx : p_idx + self.target_length]
         padded_clip = np.pad(p_wave_clip, ((0, 0), (0, self.pad_length)), mode='constant')
@@ -227,10 +231,10 @@ def run_experiment(
         stft_params: Dict[str, Any] = train_dataset.get_stft_params()
 
         train_loader = DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=True
+            train_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True, drop_last=True
         )
         val_loader = DataLoader(
-            val_dataset, batch_size=batch_size, shuffle=False, num_workers=0
+            val_dataset, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True
         )
 
         if loss_function == 'MSE':
