@@ -118,15 +118,15 @@ class SeismicCNNBackbone(nn.Module):
         self.conv_block = nn.Sequential(
             nn.Conv2d(3, 16, kernel_size=(5, 3), padding=(2, 1)),  # 3 channels in
             nn.BatchNorm2d(16),
-            nn.GELU(),
+            nn.ReLU(),
             nn.MaxPool2d(kernel_size=(2, 1)), 
             nn.Conv2d(16, 32, kernel_size=(3, 3), padding=(1, 1)),
             nn.BatchNorm2d(32),
-            nn.GELU(),
+            nn.ReLU(),
             nn.MaxPool2d(kernel_size=(2, 2)), 
             nn.Conv2d(32, 64, kernel_size=(3, 3), padding=(1, 1)),
             nn.BatchNorm2d(64),
-            nn.GELU(),
+            nn.ReLU(),
             nn.AdaptiveAvgPool2d((1, 16)) 
         )
 
@@ -144,7 +144,7 @@ class SeismicMagnitudePredictor(nn.Module):
 
         self.mlp = nn.Sequential(
             nn.Linear(64, 64),
-            nn.GELU(),
+            nn.ReLU(),
             nn.Dropout(0.4),
             nn.Linear(64, 1) 
         )
