@@ -11,9 +11,10 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-from scipy.signal import ShortTimeFFT
-from scipy.signal.windows import hann
+# from scipy.signal import ShortTimeFFT
+# from scipy.signal.windows import hann
 from torch.utils.data import DataLoader, Dataset
+import torchaudio.transforms as T
 from torchmetrics.regression import (
     MeanAbsolutePercentageError,
     PearsonCorrCoef,
@@ -106,14 +107,8 @@ class INSTANCESeismicDataset(Dataset):
         p_wave_clip = waveform[:, p_idx : p_idx + self.target_length]
         padded_clip = np.pad(p_wave_clip, ((0, 0), (0, self.pad_length)), mode='constant')
 
-        spectrograms: List[np.ndarray] = []
-        for i in range(3):
-            spec = self.SFT.spectrogram(padded_clip[i])
-            spec = np.log1p(spec) 
-            spectrograms.append(spec)
-
-        stft_tensor = torch.tensor(np.stack(spectrograms), dtype=torch.float32)
-        return stft_tensor, magnitude
+        waveform_tensor = torch.tensor(padded_clip, dtype=torch.float32)
+        return waveform_tensor, magnitude
 
 
 class SeismicCNNBackbone(nn.Module):
@@ -142,6 +137,17 @@ class SeismicCNNBackbone(nn.Module):
 class SeismicMagnitudePredictor(nn.Module):
     def __init__(self) -> None:
         super().__init__()
+        
+        # We define the STFT operation here so it GPU is utilized unlike with SciPy implenentation
+        self.spectrogram = T.Spectrogram(
+            n_fft=128,
+            win_length=128,
+            hop_length=38,         # 128 * (1 - 0.70)
+            window_fn=torch.hann_window,
+            power=1.0,             # power=1.0 gives you the magnitude (matches scale_to='magnitude')
+            normalized=False       
+        )
+
         self.cnn = SeismicCNNBackbone()
 
         self.lstm = nn.LSTM(input_size=64, hidden_size=64, num_layers=1, batch_first=True)
@@ -154,6 +160,11 @@ class SeismicMagnitudePredictor(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # input data comes in raw form: (batch_size, 3, 1000)
+        
+        x = self.spectrogram(x)
+        x = torch.log1p(x)         
+
         feats = self.cnn(x) # (batch, 64, 16)
         lstm_input = feats.permute(0, 2, 1) # (batch, 16, 64)
 
