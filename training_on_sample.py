@@ -145,6 +145,7 @@ class SeismicMagnitudePredictor(nn.Module):
             hop_length=38,         # 128 * (1 - 0.70)
             window_fn=torch.hann_window,
             power=1.0,             # power=1.0 gives you the magnitude (matches scale_to='magnitude')
+            center=False,          # padds the values at the end, not from both sides
             normalized=False       
         )
 
