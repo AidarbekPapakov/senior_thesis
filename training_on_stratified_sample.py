@@ -42,8 +42,10 @@ class INSTANCESeismicDataset(Dataset):
         hdf5_path: str, 
         target_length: int = 300, # In samples
         pad_length: int = 700, # In samples as well
-        phase: Literal['train', 'val'] = 'train',
-        train_size: float = 0.75
+        phase: Literal['train', 'val', 'test'] = 'train',
+        train_split: float = 0.7,
+        val_split: float = 0.2,
+        # test_split is thus: 1 - (train_split + val_split) = 0.1
     ) -> None:
         super().__init__()
         self.hdf5_path = hdf5_path
@@ -51,15 +53,26 @@ class INSTANCESeismicDataset(Dataset):
         self.pad_length = pad_length
         self.total_samples = target_length + pad_length 
         self.h5_file = None # Dataloader trap avoided 
-        
-        # Kept low_memory=False so pandas stops screaming at you
+
+        if phase not in ['train', 'val', 'test']:
+            raise ValueError(
+                'phase is expected to be one of the:\n[train, val, test]\n\n'
+                f'but got {phase} instead.'
+                )
+
+        if not (0 < train_split < 1 and 0 < val_split < 1 and train_split + val_split < 1):
+            raise ValueError(
+                f'Invalid splits: train={train_split}, val={val_split}. '
+                'Must be positive and sum to less than 1.'
+            )
+
         df = pd.read_csv(csv_path, low_memory=False)
         df = df.dropna(subset=['source_magnitude'])
         df = df[df['trace_eval_P'] == 'manual']
         df = df[df['station_channels'].isin(['HN', 'HH'])]
         df = df[(df['trace_npts'] - df['trace_P_arrival_sample']) >= self.total_samples]
-        
-        # 1. STRATIFY FIRST to create your custom ~11k universe
+
+        # Stratified sampling across magnitude bins
         low_mag = df[(df['source_magnitude'] >= 1.0) & (df['source_magnitude'] < 3.0)]
         low_sampled = low_mag.sample(n=5000, replace=True, random_state=42)
         
@@ -68,18 +81,21 @@ class INSTANCESeismicDataset(Dataset):
         
         high_mag = df[df['source_magnitude'] >= 5.0]
         
-        # 2. Combine and shuffle the master subset
         master_df = pd.concat([low_sampled, mid_sampled, high_mag])
         master_df = master_df.sample(frac=1, random_state=42).reset_index(drop=True)
-        
-        # 3. SPLIT this custom dataset into train and val
-        split_idx: int = int(len(master_df) * train_size)
-        
+
+        # 3-way split: train / val / test
+        n = len(master_df)
+        train_end = int(n * train_split)
+        val_end = int(n * (train_split + val_split))
+
         if phase == 'train':
-            self.metadata = master_df.iloc[:split_idx].reset_index(drop=True)
+            self.metadata = master_df.iloc[:train_end].reset_index(drop=True)
+        elif phase == 'val':
+            self.metadata = master_df.iloc[train_end:val_end].reset_index(drop=True)
         else:
-            self.metadata = master_df.iloc[split_idx:].reset_index(drop=True)
-            
+            self.metadata = master_df.iloc[val_end:].reset_index(drop=True)
+
         logger.info(f"Initialized {phase} dataset with {len(self.metadata)} valid traces.")
 
         # STFT Parameters
@@ -155,7 +171,7 @@ class SeismicMagnitudePredictor(nn.Module):
             win_length=128,
             hop_length=38,         # 128 * (1 - 0.70)
             window_fn=torch.hann_window,
-            power=1.0,             # power=1.0 gives you the magnitude (matches scale_to='magnitude')
+            power=1.0,             # power=1.0 in torchaudio is the equivalent to scale_to='magnitude'
             center=False,          # padds the values at the end, not from both sides
             normalized=False       
         )
@@ -197,7 +213,9 @@ def run_experiment(
     loss_function: Literal['MSE', 'HuberLoss'] = 'MSE',
     lr: float = 1e-3,
     weight_decay: float = 1e-5,
-    train_size: float = 0.75,
+    train_split: float = 0.7,
+    val_split: float = 0.2,
+    # test_split = 1 - train_split - val_split = 0.1
     scheduler_alg: Literal['exp', 'cos'] | None = 'cos',
     cos_eta_min: float | None = 1e-7,
     exp_lr_scheduler: float | None = 0.995,
@@ -225,6 +243,7 @@ def run_experiment(
     result_dir: str = f'./training_results/{yyyy}_{mm}_{dd}/{experiment_name}'
     viz_file_name: str = 'training_metrics.jpg'
     extra_metrics_file_name: str = 'regression_metrics.jpg'
+    residuals_file_name: str = 'residuals_test.jpg'
     hyperparam_filename: str = 'hyperparams.json'
 
     os.makedirs(result_dir, exist_ok=True)
@@ -243,21 +262,35 @@ def run_experiment(
         print(f'Initializing CRNN Model on {device}...')
         
         model = SeismicMagnitudePredictor().to(device)
-        
-        train_dataset = INSTANCESeismicDataset(
-            csv_path, hdf5_path, target_length, pad_length, phase='train', train_size=train_size
+
+        shared_dataset_kwargs = dict(
+            csv_path=csv_path,
+            hdf5_path=hdf5_path,
+            target_length=target_length,
+            pad_length=pad_length,
+            train_split=train_split,
+            val_split=val_split,
         )
-        val_dataset = INSTANCESeismicDataset(
-            csv_path, hdf5_path, target_length, pad_length, phase='val', train_size=train_size
-        )
-        
+
+        train_dataset = INSTANCESeismicDataset(**shared_dataset_kwargs, phase='train')
+        val_dataset   = INSTANCESeismicDataset(**shared_dataset_kwargs, phase='val')
+
         stft_params: Dict[str, Any] = train_dataset.get_stft_params()
 
         train_loader = DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True, drop_last=True
+            dataset=train_dataset, 
+            batch_size=batch_size, 
+            shuffle=True,
+            num_workers=8, 
+            pin_memory=True, 
+            drop_last=True
         )
         val_loader = DataLoader(
-            val_dataset, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True
+            dataset=val_dataset, 
+            batch_size=batch_size, 
+            shuffle=False,
+            num_workers=8, 
+            pin_memory=True
         )
 
         if loss_function == 'MSE':
@@ -300,7 +333,9 @@ def run_experiment(
             'learning_rate': lr,
             'weight_decay': weight_decay,
             'batch_size': batch_size,
-            'train_size': train_size,
+            'train_split': train_split,
+            'val_split': val_split,
+            'test_split': round(1.0 - train_split - val_split, 10),
             'target_length': target_length,
             'pad_length': pad_length,
             'loss_fn': loss_function,
@@ -314,9 +349,8 @@ def run_experiment(
         train_MAEs: List[float] = []
         val_MAEs: List[float] = []
 
-        # Extra metric progressions (val only)
-        val_MAPEs: List[float] = []
-        val_R2s: List[float] = []
+        val_MAPEs:    List[float] = []
+        val_R2s:      List[float] = []
         val_Pearsons: List[float] = []
         val_Spearmans: List[float] = []
 
@@ -502,6 +536,93 @@ def run_experiment(
     plt.savefig(os.path.join(current_experiment_dir, extra_metrics_file_name))
     plt.close(fig2)
 
+    # Test (Needed to ultimately test the model performance and summarize via scatter plot & resiudals protting)
+    print('\nLoading best model for evaluation on test set...')
+    best_model = SeismicMagnitudePredictor().to(device)
+    best_model.load_state_dict(
+        torch.load(os.path.join(models_dir, 'best_model.pth'), map_location=device)
+    )
+    best_model.eval()
+
+    test_dataset = INSTANCESeismicDataset(
+        csv_path=csv_path,
+        hdf5_path=hdf5_path,
+        target_length=target_length,
+        pad_length=pad_length,
+        phase='test',
+        train_split=train_split,
+        val_split=val_split,
+    )
+
+    test_loader = DataLoader(
+        dataset=test_dataset, 
+        batch_size=batch_size, 
+        shuffle=False,
+        num_workers=8, 
+        pin_memory=True
+    )
+
+    test_preds: List[torch.Tensor] = []
+    test_targets: List[torch.Tensor] = []
+
+    test_progression_bar = tqdm(test_loader, desc='Test inference')
+
+    with torch.inference_mode():
+        for inputs, targets in test_progression_bar:
+
+            inputs  = inputs.to(device, non_blocking=True)
+            targets = targets.to(device, non_blocking=True)
+
+            outputs = best_model(inputs)
+
+            test_preds.append(outputs.squeeze(1).cpu())
+            test_targets.append(targets.squeeze(1).cpu())
+
+    test_preds_np   = torch.cat(test_preds).numpy()
+    test_targets_np = torch.cat(test_targets).numpy()
+    residuals       = test_preds_np - test_targets_np  # positive = over-prediction
+
+    # Log the summary
+    print(
+        f'\nTest Set Results — '
+        f'MAE: {np.mean(np.abs(residuals)):.4f} | '
+        f'RMSE: {np.sqrt(np.mean(residuals**2)):.4f} | '
+        f'Bias (mean residual): {np.mean(residuals):.4f}'
+    )
+
+    # Plot resiudals
+    fig3, axes3 = plt.subplots(1, 2, figsize=(12, 5), dpi=200)
+
+    # 1. scatter plot of predicted magnitudes vs ground truth
+    mag_min = min(test_targets_np.min(), test_preds_np.min()) - 0.2
+    mag_max = max(test_targets_np.max(), test_preds_np.max()) + 0.2
+    axes3[0].scatter(test_targets_np, test_preds_np, alpha=0.35, s=12, color=(0, 0.35, 0.85))
+    axes3[0].plot([mag_min, mag_max], [mag_min, mag_max], 'r--', linewidth=1.2, label='Perfect fit')
+    axes3[0].set_xlim(mag_min, mag_max)
+    axes3[0].set_ylim(mag_min, mag_max)
+    axes3[0].set_xlabel('Ground Truth Magnitude')
+    axes3[0].set_ylabel('Predicted Magnitude')
+    axes3[0].set_title('Predicted vs Ground Truth')
+    axes3[0].legend(fontsize=9)
+
+    # 2. Residuals histogram
+    axes3[1].hist(residuals, bins=50, color=(0.4, 0.0, 0.7), edgecolor='white', linewidth=0.4)
+    axes3[1].axvline(0, color='red', linestyle='--', linewidth=1.2)
+    axes3[1].axvline(np.mean(residuals), color='orange', linestyle='-', linewidth=1.2,
+                     label=f'Mean = {np.mean(residuals):.3f}')
+    axes3[1].set_xlabel('Residual (Predicted − Ground Truth)')
+    axes3[1].set_ylabel('Count')
+    axes3[1].set_title('Residuals Distribution')
+    axes3[1].legend(fontsize=9)
+
+    plt.tight_layout()
+    plt.savefig(os.path.join(current_experiment_dir, residuals_file_name))
+    plt.close(fig3)
+    print(f'Residuals plot saved to `{os.path.join(current_experiment_dir, residuals_file_name)}`')
+
+    del best_model
+    torch.cuda.empty_cache()
+
 
 if __name__ == "__main__":
     
@@ -529,7 +650,9 @@ if __name__ == "__main__":
             pad_length=pad_needed,
             batch_size=512,
             lr=1e-3,
-            train_size=0.8,
+            train_split=0.7,
+            val_split=0.2,
+            # test = 0.1 implicitly
             scheduler_alg='cos',
             epochs=300,
             no_progress_crash_out=100
