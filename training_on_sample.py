@@ -47,6 +47,8 @@ class INSTANCESeismicDataset(Dataset):
     ) -> None:
         super().__init__()
         self.hdf5_path = hdf5_path
+        self.h5_file = None
+
         self.target_length = target_length
         self.pad_length = pad_length
         self.total_samples = target_length + pad_length 
@@ -94,8 +96,6 @@ class INSTANCESeismicDataset(Dataset):
         
         # Target variable
         magnitude = torch.tensor([row['source_magnitude']], dtype=torch.float32)
-
-        self.h5_file = None
 
         if self.h5_file is None:
             self.h5_file = h5py.File(self.hdf5_path, 'r')
