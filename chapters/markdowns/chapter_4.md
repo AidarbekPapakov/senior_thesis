@@ -2,17 +2,14 @@
 
 ## 4.1 Overview
 
-Deep learning models require large volumes of labeled training data in order to learn reliable relationships between seismic waveforms and earthquake parameters. In the context of earthquake magnitude estimation, the training dataset must contain both the waveform recordings and the associated ground truth magnitude values for each event.
+Although deep learning has shown to excel at processing complex and high-structure data, they still require large amount of data in order to perform moderately. In the context of earthquake magnitude estimation, the training dataset must contain both the 3-component waveform recordings and the associated ground truth magnitude values for each event.
 
-The present study utilizes a combination of global and regional seismic datasets. Global datasets provide large-scale diversity in seismic signals, allowing the model to learn general patterns associated with earthquake magnitude. Regional datasets, in contrast, provide information about local geological conditions and instrument characteristics.
+For this study, two major datasets are used:
 
-The dataset used in this study therefore combines three primary sources:
+- the STanford EArthquake Dataset (STEAD).
+- the INSTANCE dataset developed by the Istituto Nazionale di Geofisica e Vulcanologia (INGV).
 
-- the STanford EArthquake Dataset (STEAD),
-- the INSTANCE dataset developed by the Istituto Nazionale di Geofisica e Vulcanologia (INGV), and
-- regional seismic recordings from the Central Asian Institute for Applied Geosciences (CAIAG).
-
-The first two datasets are used primarily for large-scale model training, while the CAIAG dataset is used for regional evaluation and fine-tuning.
+The data used for testing the our approach combines both of them The datasets are used primarily for large-scale model training,
 
 ## 4.2 Data Sources
 
