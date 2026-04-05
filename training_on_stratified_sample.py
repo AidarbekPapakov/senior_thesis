@@ -1,18 +1,14 @@
 import json
 import logging
 import os
-import warnings
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Tuple
 
-import h5py
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-# from scipy.signal import ShortTimeFFT
-# from scipy.signal.windows import hann
 from torch.utils.data import DataLoader, Dataset
 import torchaudio.transforms as T
 from torchmetrics.regression import (
@@ -35,24 +31,19 @@ def set_seed(seed: int = 67) -> None:
 # Set seed for NumPy, PyTorch, etc.
 set_seed()
 
-class INSTANCESeismicDataset(Dataset):
+class UnifiedSeismicDataset(Dataset):
     def __init__(
         self, 
-        csv_path: str, 
-        hdf5_path: str, 
-        target_length: int = 300, # In samples
-        pad_length: int = 700, # In samples as well
+        memmap_path: str,
+        csv_path: str,
+        n_samples: int,
+        target_length: int = 1000,
         phase: Literal['train', 'val', 'test'] = 'train',
         train_split: float = 0.7,
         val_split: float = 0.2,
         # test_split is thus: 1 - (train_split + val_split) = 0.1
     ) -> None:
         super().__init__()
-        self.hdf5_path = hdf5_path
-        self.target_length = target_length
-        self.pad_length = pad_length
-        self.total_samples = target_length + pad_length 
-        self.h5_file = None # Dataloader trap avoided 
 
         if phase not in ['train', 'val', 'test']:
             raise ValueError(
@@ -66,35 +57,26 @@ class INSTANCESeismicDataset(Dataset):
                 'Must be positive and sum to less than 1.'
             )
 
-        df = pd.read_csv(csv_path, low_memory=False)
-        df = df.dropna(subset=['source_magnitude'])
-        df = df[df['trace_eval_P'] == 'manual']
-        df = df[df['station_channels'].isin(['HN', 'HH'])]
-        df = df[(df['trace_npts'] - df['trace_P_arrival_sample']) >= self.total_samples]
+        self.target_length = target_length
+        self.waveforms = np.memmap(
+            memmap_path, dtype='float32',
+            mode='r', shape=(n_samples, 3, 1000)
+        )
 
-        # Stratified sampling across magnitude bins
-        low_mag = df[(df['source_magnitude'] >= 1.0) & (df['source_magnitude'] < 3.0)]
-        low_sampled = low_mag.sample(n=5000, replace=True, random_state=42)
-        
-        mid_mag = df[(df['source_magnitude'] >= 3.0) & (df['source_magnitude'] < 5.0)]
-        mid_sampled = mid_mag.sample(n=5000, replace=True, random_state=42)
-        
-        high_mag = df[df['source_magnitude'] >= 5.0]
-        
-        master_df = pd.concat([low_sampled, mid_sampled, high_mag])
-        master_df = master_df.sample(frac=1, random_state=42).reset_index(drop=True)
-
-        # 3-way split: train / val / test
-        n = len(master_df)
+        df = pd.read_csv(csv_path)
+        n = len(df)
         train_end = int(n * train_split)
         val_end = int(n * (train_split + val_split))
 
         if phase == 'train':
-            self.metadata = master_df.iloc[:train_end].reset_index(drop=True)
+            self.metadata = df.iloc[:train_end].reset_index(drop=True)
+            self.indices = list(range(train_end))
         elif phase == 'val':
-            self.metadata = master_df.iloc[train_end:val_end].reset_index(drop=True)
+            self.metadata = df.iloc[train_end:val_end].reset_index(drop=True)
+            self.indices = list(range(train_end, val_end))
         else:
-            self.metadata = master_df.iloc[val_end:].reset_index(drop=True)
+            self.metadata = df.iloc[val_end:].reset_index(drop=True)
+            self.indices = list(range(val_end, n))
 
         logger.info(f"Initialized {phase} dataset with {len(self.metadata)} valid traces.")
 
@@ -119,31 +101,18 @@ class INSTANCESeismicDataset(Dataset):
         return len(self.metadata)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        row = self.metadata.iloc[idx]
-        trace_name = row['trace_name']
-        p_idx = int(row['trace_P_arrival_sample'])
-        
-        # Target variable
-        magnitude = torch.tensor([row['source_magnitude']], dtype=torch.float32)
+        wave = self.waveforms[self.indices[idx]].copy()  # (3, 1000)
 
-        if self.h5_file is None:
-            self.h5_file = h5py.File(self.hdf5_path, 'r')
+        # Zero out everything past target_length — this is how you swap
+        # between 3s/5s/8s experiments without re-running preprocessing
+        if self.target_length < 1000:
+            wave[:, self.target_length:] = 0.0
 
-        waveform = self.h5_file['data'][trace_name][:]    
+        magnitude = torch.tensor(
+            [self.metadata.iloc[idx]['source_magnitude']], dtype=torch.float32
+        )
+        return torch.from_numpy(wave), magnitude
 
-        p_wave_clip = waveform[:, p_idx : p_idx + self.target_length]
-        padded_clip = np.pad(p_wave_clip, ((0, 0), (0, self.pad_length)), mode='constant')
-
-        waveform_tensor = torch.tensor(padded_clip, dtype=torch.float32)
-        return waveform_tensor, magnitude
-
-    # def __getitem__(self, idx):
-    #     wave = self.waveforms[self.indices[idx]].copy()  # (3, 1000)
-    #     # zero out everything past target_length
-    #     wave[:, self.target_length:] = 0.0
-    #     return torch.from_numpy(wave), torch.tensor(
-    #         [self.metadata.iloc[idx]['source_magnitude']], dtype=torch.float32
-    #     )
 
 class SeismicCNNBackbone(nn.Module):
     def __init__(self) -> None:
@@ -211,11 +180,12 @@ class SeismicMagnitudePredictor(nn.Module):
 
 
 def run_experiment(
+    memmap_path: str,
     csv_path: str,
-    hdf5_path: str,
+    n_samples: int,
     experiment_name: str = 'magnitude_prediction',
-    target_length: int = 300,
-    pad_length: int = 700,
+    target_length: int = 1000,
+    pad_length: int = 0,
     batch_size: int = 64,
     loss_function: Literal['MSE', 'HuberLoss'] = 'MSE',
     lr: float = 1e-3,
@@ -271,16 +241,16 @@ def run_experiment(
         model = SeismicMagnitudePredictor().to(device)
 
         shared_dataset_kwargs = dict(
+            memmap_path=memmap_path,
             csv_path=csv_path,
-            hdf5_path=hdf5_path,
+            n_samples=n_samples,
             target_length=target_length,
-            pad_length=pad_length,
             train_split=train_split,
             val_split=val_split,
         )
 
-        train_dataset = INSTANCESeismicDataset(**shared_dataset_kwargs, phase='train')
-        val_dataset   = INSTANCESeismicDataset(**shared_dataset_kwargs, phase='val')
+        train_dataset = UnifiedSeismicDataset(**shared_dataset_kwargs, phase='train')
+        val_dataset   = UnifiedSeismicDataset(**shared_dataset_kwargs, phase='val')
 
         stft_params: Dict[str, Any] = train_dataset.get_stft_params()
 
@@ -553,11 +523,11 @@ def run_experiment(
     )
     best_model.eval()
 
-    test_dataset = INSTANCESeismicDataset(
+    test_dataset = UnifiedSeismicDataset(
+        memmap_path=memmap_path,
         csv_path=csv_path,
-        hdf5_path=hdf5_path,
+        n_samples=n_samples,
         target_length=target_length,
-        pad_length=pad_length,
         phase='test',
         train_split=train_split,
         val_split=val_split,
@@ -635,10 +605,17 @@ def run_experiment(
 
 
 if __name__ == "__main__":
-    
-    csv_file: str = "/mnt/d/Downloads/Senior_Thesis/INSTANCE/metadata_Instance_events_v3.csv.bz2"
-    hdf5_file: str = "/mnt/d/Downloads/Senior_Thesis/INSTANCE/Instance_events_gm.hdf5"
-    
+
+    DATA_DIR: str = '/home/aidar/study/senior_thesis/data/unified'
+    info_file: str = 'info.json' 
+    waveforms_events_file: str = 'waveforms_events.bin'
+    metadata_events_file: str = 'metadata_events.csv'
+
+    with open(os.path.join(DATA_DIR, info_file)) as f:
+        info = json.load(f)
+
+    n_samples = info['events']['n_written']  # 75000
+
     # We test the 3-second, 5-second, and 8-second extraction here
     target_lengths: List[int] = [
         300, 
@@ -653,17 +630,19 @@ if __name__ == "__main__":
         pad_needed = 1000 - length
         
         run_experiment(
-            csv_path=csv_file,
-            hdf5_path=hdf5_file,
+            memmap_path=os.path.join(DATA_DIR, waveforms_events_file),
+            csv_path=os.path.join(DATA_DIR, metadata_events_file),
+            n_samples=n_samples,
             experiment_name=f'magnitude_pred_{length}_samples',
             target_length=length,
             pad_length=pad_needed,
             batch_size=512,
-            lr=1e-3,
+            lr=3e-4,
             train_split=0.7,
             val_split=0.2,
             # test = 0.1 implicitly
-            scheduler_alg='cos',
-            epochs=300,
+            scheduler_alg='exp',
+            exp_lr_scheduler=0.998,
+            epochs=500,
             no_progress_crash_out=100
         )
