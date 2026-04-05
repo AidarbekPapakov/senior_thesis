@@ -137,6 +137,13 @@ class INSTANCESeismicDataset(Dataset):
         waveform_tensor = torch.tensor(padded_clip, dtype=torch.float32)
         return waveform_tensor, magnitude
 
+    # def __getitem__(self, idx):
+    #     wave = self.waveforms[self.indices[idx]].copy()  # (3, 1000)
+    #     # zero out everything past target_length
+    #     wave[:, self.target_length:] = 0.0
+    #     return torch.from_numpy(wave), torch.tensor(
+    #         [self.metadata.iloc[idx]['source_magnitude']], dtype=torch.float32
+    #     )
 
 class SeismicCNNBackbone(nn.Module):
     def __init__(self) -> None:
@@ -281,16 +288,18 @@ def run_experiment(
             dataset=train_dataset, 
             batch_size=batch_size, 
             shuffle=True,
-            num_workers=8, 
+            num_workers=4, 
             pin_memory=True, 
-            drop_last=True
+            drop_last=True,
+            persistent_workers=True,
         )
         val_loader = DataLoader(
             dataset=val_dataset, 
             batch_size=batch_size, 
             shuffle=False,
-            num_workers=8, 
-            pin_memory=True
+            num_workers=4, 
+            pin_memory=True,
+            persistent_workers=True
         )
 
         if loss_function == 'MSE':
@@ -558,8 +567,9 @@ def run_experiment(
         dataset=test_dataset, 
         batch_size=batch_size, 
         shuffle=False,
-        num_workers=8, 
-        pin_memory=True
+        num_workers=4, 
+        pin_memory=True,
+        persistent_workers=True
     )
 
     test_preds: List[torch.Tensor] = []
