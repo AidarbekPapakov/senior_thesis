@@ -22,61 +22,49 @@ The dataset contains 1.2 million seismic recordings collected from stations arou
 Key characteristics of the dataset include:
 
 - approximately 1.2 million waveform traces,
-- includes three-component recordings (vertical, north–south, east–west),
+- three-component recordings (vertical, north–south, east–west),
 - waveform length of  ~60 seconds,
 - sampling rate of 100 Hz,
 - annotated P-wave and S-wave arrival times, and
 - associated event metadata including earthquake magnitude and hypocenter location.
 
-Because of its size and high variability of the event locations, STEAD provides a diverse training set that includes earthquakes with representative sets of features.
+STEAD was chosen to be one of our primary data sources because of its size and high variability of the event locations, which grants us an access to earthquakes with representative sets of features.
 
-However, as it is the case for the most seismic datasets, this suffers from a noticable magnitude "imbalance". Most events lay within the range of approximately magnitude 2.0 to 4.0, while earthquakes of magnitude >5.0 are relatively rare. Despite the fact this imbalance reflects the natural distribution of earthquakes, we still have to take care of large events' representation in the dataset as the main goal of this study is to understand to what extent the first seconds of P-waves and the ultimate magnitude are related. 
+However, as it is the case for the most seismic datasets, STEAD "suffers" from a noticable skew towards lower-magnitude earthquakes. Most events lay within the range of approximately magnitude 2.0 to 4.0, while earthquakes of magnitude >5.0 are relatively rare. Despite the fact this imbalance reflects the natural distribution of earthquakes, we still have to take care of large events' representation in the dataset as the main goal of this study is to understand to what extent the first seconds of P-waves and the magnitude are related. 
 
 *[Figure 4.1: Example three-component seismic waveform from the STEAD dataset]*
 
 ### 4.2.2 The INSTANCE Dataset
 
-The INSTANCE dataset is a large seismic waveform dataset developed by the Italian National Institute of Geophysics and Volcanology (INGV).
+As it is the case for STEAD, The INSTANCE dataset is also intended for machine learning experiments. The dataset developed by the Italian National Institute of Geophysics and Volcanology (INGV).
 
-Unlike many automatically labeled seismic datasets, the INSTANCE dataset includes manually reviewed seismic phase picks performed by trained analysts. This manual verification significantly improves the reliability of arrival time annotations.
+And just as the STEAD dataset, this one contains ~1.2 million waveform recordings as well, each with the following properties:
 
-The dataset contains approximately 1.2 million waveform recordings, each with the following properties:
-
-- three-component seismic traces,
+- three-component recordings (vertical, north–south, east–west),
 - waveform duration of 120 seconds,
 - sampling rate of 100 Hz,
 - magnitude range approximately 0.0 to 6.5, and
 - manually reviewed P-wave and S-wave arrival times.
 
-Prior to publication, the dataset underwent several preprocessing steps performed by the dataset creators. These steps include removal of traces containing data gaps, trimming of waveform segments to consistent start times, resampling to a uniform sampling frequency, removal of mean offsets and linear trends, computation of signal-to-noise ratios, and extraction of quality control metrics.
+As it is stated by the authors, the dataset underwent several preprocessing steps: 
 
-The presence of carefully verified phase picks makes INSTANCE particularly valuable for training models that rely on accurate P-wave detection.
+1) removal of traces containing data gaps
+2) trimming of waveform segments to consistent start times
+3) resampling to a uniform sampling frequency 
+4) removal of mean offsets and linear trends
+5) computation of signal-to-noise ratios, and extraction of quality control metrics.
 
 *[Figure 4.2: Example waveform segment from the INSTANCE dataset]*
 
-### 4.2.3 CAIAG Regional Seismic Data
-
-The Central Asian Institute for Applied Geosciences (CAIAG) maintains seismic monitoring networks across Kyrgyzstan and neighboring regions of Central Asia.
-
-The seismic activity of this region is associated primarily with the collision between the Indian and Eurasian tectonic plates. As a result, the region experiences frequent moderate earthquakes and occasional large seismic events.
-
-Incorporating CAIAG data into the training process provides several advantages. It allows the model to learn signal characteristics specific to the regional crustal structure. It enables evaluation of the model's performance on data collected in the geographic region where deployment may occur. It also reduces the domain shift between training and real-world operational conditions.
-
-Compared to global datasets such as STEAD, the CAIAG dataset is expected to be smaller in size. For this reason, it is primarily used for fine-tuning and evaluation rather than large-scale pretraining.
-
-*[Figure 4.3: Map of seismic station distribution in the CAIAG network]*
 
 ### 4.2.4 Dataset Combination Strategy
 
-Training a deep learning model on a single dataset may lead to overfitting to the characteristics of that dataset. Differences in instrument response, geological structure, and noise conditions can cause models trained on one dataset to perform poorly on another.
+Before we start the conversation on the datasets we have tested, we need to clarify one important thing. As it was mentioned, both datasets' metadata include the information on the type of phase picking: manual and automated. In this study, we only take into account the observations which P and S arrivals were labelled by the experts in the field. Although, it was mentioned in literature review that modern machine learning approaches manage phase picking quite well, we still decided to omit the observations automated labels due to potential introduction of bias into our training data. It is in general a good practice, for any machine learning problem, to aim to use the data which labels are fact-checked by the human experts even if the initial annotaion was not made by a human.
 
-To address this issue, the present study adopts a multi-stage training strategy.
+Moving to the datasets themselves, the authors of INSTANCE dataset provide a sample of the whole dataset that contains only 10,000 observations, which after our filtering is left with ~8,000 data instances. But as we have discussed with the STEAD dataset, this sample is heavily skewed towards lower bound of magnitude, which is not a bad thing, but in the context of our study is not quite the aim. Nevertheless, the proposed model was still tested on this sample. 
 
-First, the model is trained on a combined dataset constructed from the STEAD and INSTANCE datasets. These datasets provide large-scale coverage of seismic signals from diverse regions and therefore allow the model to learn generalizable representations.
+The following part might seem a bit controversial and counter-intuitive at first, but we will explain the choices we have made. To test out approach, we sampled a portion of data from both datasets in even proportions. Eventually, we have a dataset consisting of 75,000 (37,500 from INSTANCES and 37,500 from STEAD) actual events, each being represented by a 3-componenet waveforms with an assigned magnitude value. Here is the controversial part comes: instead of random sampling from both datasets
 
-Second, the model is fine-tuned using the CAIAG dataset in order to adapt it to the regional seismic characteristics of Central Asia.
-
-This approach follows a common paradigm in machine learning known as **transfer learning**, in which a model trained on a large dataset is subsequently adapted to a smaller but more specialized dataset.
 
 ## 4.3 Preprocessing Pipeline
 
