@@ -2,35 +2,35 @@
 
 ## 4.1 Overview
 
-Although deep learning has shown to excel at processing complex and high-structure data, they still require large amount of data in order to perform moderately. In the context of earthquake magnitude estimation, the training dataset must contain both the 3-component waveform recordings and the associated ground truth magnitude values for each event.
+Although deep learning has shown to excel at processing complex and high-structure data, it still requires large amounts of data in order to perform at a decent level. In the context of our stud, we postulate that the training dataset must contain both the 3-component waveform recordings and the associated ground truth magnitude value for each event.
 
-For this study, two major datasets are used:
+In our case two major datasets are used:
 
 - the STanford EArthquake Dataset (STEAD).
 - the INSTANCE dataset developed by the Istituto Nazionale di Geofisica e Vulcanologia (INGV).
 
-The data used for testing the our approach combines both of them The datasets are used primarily for large-scale model training,
+The data used for testing our approach combines both of them in x:1-x proportion.
 
 ## 4.2 Data Sources
 
 ### 4.2.1 The STEAD Dataset
 
-The STanford EArthquake Dataset (STEAD) is one of the largest publicly available datasets of labeled seismic waveforms designed specifically for machine learning research.
+The STanford EArthquake Dataset (STEAD) is one of the largest open-sourced datasets of labeled seismic waveforms made specifically research in machine learning.
 
-The dataset contains over one million three-component waveform recordings collected from seismic stations around the world. Each waveform corresponds either to a detected earthquake signal or to background seismic noise.
+The dataset contains 1.2 million seismic recordings collected from stations around the world. Each waveform corresponds either to a detected earthquake signal or to background seismic noise.
 
 Key characteristics of the dataset include:
 
 - approximately 1.2 million waveform traces,
-- three-component recordings (vertical, north–south, east–west),
-- waveform length of approximately 60 seconds,
+- includes three-component recordings (vertical, north–south, east–west),
+- waveform length of  ~60 seconds,
 - sampling rate of 100 Hz,
 - annotated P-wave and S-wave arrival times, and
 - associated event metadata including earthquake magnitude and hypocenter location.
 
-Because of its size and global coverage, STEAD provides a diverse training corpus that includes earthquakes from many different tectonic environments.
+Because of its size and high variability of the event locations, STEAD provides a diverse training set that includes earthquakes with representative sets of features.
 
-However, the dataset exhibits a strong magnitude imbalance. Most recorded events fall within the range of approximately magnitude 2 to 4, while large earthquakes above magnitude 6 are relatively rare. This imbalance reflects the natural frequency distribution of earthquakes and must be addressed during model training.
+However, as it is the case for the most seismic datasets, this suffers from a noticable magnitude "imbalance". Most events lay within the range of approximately magnitude 2.0 to 4.0, while earthquakes of magnitude >5.0 are relatively rare. Despite the fact this imbalance reflects the natural distribution of earthquakes, we still have to take care of large events' representation in the dataset as the main goal of this study is to understand to what extent the first seconds of P-waves and the ultimate magnitude are related. 
 
 *[Figure 4.1: Example three-component seismic waveform from the STEAD dataset]*
 
