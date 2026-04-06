@@ -9,14 +9,23 @@ Output layout:
         metadata_noise.csv       trace_name, source, hdf5_path
         info.json                shape metadata for both memmaps
 
-Stratification target (events, ~100k total):
+Stratification target (events, ~53.5k total):
     magnitude [1.0, 3.0) → 25k   (replace=True if not enough)
     magnitude [3.0, 5.0) → 25k   (replace=True if not enough)
-    magnitude [5.0,  ∞ ) → 25k   (replace=True if not enough, these are rare)
+    magnitude [5.0,  ∞ ) → ~3.5k (no oversampling — use what exists)
     Split roughly 50/50 INSTANCE vs STEAD per bin where possible.
 
-Noise target: ~20k from STEAD chunks (no full INSTANCE noise HDF5 available).
+Noise target: ~20k from STEAD noise chunks.
 If you locate Instance_noise_gm.hdf5, set INSTANCE_NOISE_HDF5 below and it will be included.
+
+Preprocessing applied to all waveforms (events + noise):
+    - Linear detrend per channel       (scipy.signal.detrend)
+    - Demean per channel               (subtract channel mean)
+    STEAD already has this baked in from the authors, but applying it again is
+    idempotent and ensures consistency across both datasets.
+
+Window convention:
+    Window starts exactly at P arrival: [p_idx : p_idx + TOTAL].
 """
 
 import json
@@ -24,6 +33,7 @@ import os
 import numpy as np
 import pandas as pd
 import h5py
+from scipy.signal import detrend
 from typing import Optional
 
 # ─────────────────────────────────────────────
@@ -37,17 +47,18 @@ INSTANCE_HDF5 = "/mnt/d/Downloads/Senior_Thesis/INSTANCE/Instance_events_gm.hdf5
 INSTANCE_NOISE_CSV  = "/mnt/d/Downloads/Senior_Thesis/INSTANCE/metadata_Instance_noise.csv.bz2"
 INSTANCE_NOISE_HDF5 = None  # e.g. "/mnt/d/.../Instance_noise_gm.hdf5" if you have it
 
-STEAD_DIR = "/mnt/d/Downloads/Senior_Thesis/STEAD/unzipped"
+STEAD_DIR    = "/mnt/d/Downloads/Senior_Thesis/STEAD/unzipped"
 STEAD_CHUNKS = [f"chunk{i}" for i in range(1, 7)]
 
-OUT_DIR  = "/home/aidar/study/senior_thesis/data"
-TOTAL    = 1000   # samples per waveform — fixed
+OUT_DIR = "/home/aidar/study/senior_thesis/data/proper"
+TOTAL   = 1000   # total samples per waveform window
 
 # Stratified event targets (per bin, across both datasets combined)
+# High-magnitude bin has no fixed target — use however many exist (no oversampling).
 BIN_TARGETS = {
     "low":  25_000,   # magnitude [1.0, 3.0)
     "mid":  25_000,   # magnitude [3.0, 5.0)
-    "high": 25_000,   # magnitude [5.0, ∞)
+    "high": None,     # magnitude [5.0, ∞) — take all, no oversampling
 }
 NOISE_TARGET = 20_000
 
@@ -72,6 +83,17 @@ def _stratified_sample(df: pd.DataFrame, target: int, seed: int = 42) -> pd.Data
     return df.sample(n=target, replace=replace, random_state=seed).reset_index(drop=True)
 
 
+def _preprocess_clip(clip: np.ndarray) -> np.ndarray:
+    """
+    Apply linear detrend + demean per channel.
+    Input/output shape: (3, N) float32.
+    Idempotent — safe to apply to STEAD even though it's already preprocessed.
+    """
+    clip = detrend(clip, axis=1, type="linear")
+    clip -= clip.mean(axis=1, keepdims=True)
+    return clip.astype(np.float32)
+
+
 # ─────────────────────────────────────────────
 #  METADATA LOADERS
 # ─────────────────────────────────────────────
@@ -82,10 +104,12 @@ def load_instance_events(csv_path: str) -> pd.DataFrame:
     df = df.dropna(subset=["source_magnitude"])
     df = df[df["trace_eval_P"] == "manual"]
     df = df[df["station_channels"].isin(["HN", "HH"])]
+    # Guard against any non-100Hz traces: INSTANCE stores sample interval as trace_dt_s
+    df = df[df["trace_dt_s"] == 0.01]
     df = df[(df["trace_npts"] - df["trace_P_arrival_sample"]) >= TOTAL]
     df = df[df["source_magnitude"] >= 1.0]
     df = df.reset_index(drop=True)
-    df["source"] = "instance"
+    df["source"]    = "instance"
     df["hdf5_path"] = INSTANCE_HDF5
     df = df.rename(columns={"trace_P_arrival_sample": "p_arrival_sample"})
     print(f"  INSTANCE events after filtering: {len(df)}")
@@ -96,16 +120,16 @@ def load_stead_events(stead_dir: str, chunks: list) -> pd.DataFrame:
     print("Loading STEAD events metadata (all chunks)...")
     dfs = []
     for chunk in chunks:
-        csv_path = os.path.join(stead_dir, chunk, f"{chunk}.csv")
+        csv_path  = os.path.join(stead_dir, chunk, f"{chunk}.csv")
         hdf5_path = os.path.join(stead_dir, chunk, f"{chunk}.hdf5")
         df = pd.read_csv(csv_path, low_memory=False)
         df = df[df["trace_category"].isin(["earthquake_local", "earthquake_regional"])]
         df = df.dropna(subset=["source_magnitude", "p_arrival_sample"])
         df = df[df["source_magnitude"] >= 1.0]
-        # STEAD waveforms are 6000 samples — make sure there's 1000 samples after P
+        # Need TOTAL samples after P; STEAD waveforms are 6000 samples total
         df = df[df["p_arrival_sample"] <= (6000 - TOTAL)]
         df = df.reset_index(drop=True)
-        df["source"] = f"stead_{chunk}"
+        df["source"]    = f"stead_{chunk}"
         df["hdf5_path"] = hdf5_path
         print(f"  {chunk}: {len(df)} earthquake traces")
         dfs.append(df[["trace_name", "p_arrival_sample", "source_magnitude", "source", "hdf5_path"]])
@@ -118,12 +142,12 @@ def load_stead_noise(stead_dir: str, chunks: list) -> pd.DataFrame:
     print("Loading STEAD noise metadata (all chunks)...")
     dfs = []
     for chunk in chunks:
-        csv_path = os.path.join(stead_dir, chunk, f"{chunk}.csv")
+        csv_path  = os.path.join(stead_dir, chunk, f"{chunk}.csv")
         hdf5_path = os.path.join(stead_dir, chunk, f"{chunk}.hdf5")
         df = pd.read_csv(csv_path, low_memory=False)
         df = df[df["trace_category"] == "noise"]
         df = df.reset_index(drop=True)
-        df["source"] = f"stead_{chunk}"
+        df["source"]    = f"stead_{chunk}"
         df["hdf5_path"] = hdf5_path
         print(f"  {chunk}: {len(df)} noise traces")
         dfs.append(df[["trace_name", "source", "hdf5_path"]])
@@ -136,7 +160,7 @@ def load_instance_noise(csv_path: str, hdf5_path: str) -> pd.DataFrame:
     print("Loading INSTANCE noise metadata...")
     df = pd.read_csv(csv_path, low_memory=False)
     df = df.reset_index(drop=True)
-    df["source"] = "instance_noise"
+    df["source"]    = "instance_noise"
     df["hdf5_path"] = hdf5_path
     print(f"  INSTANCE noise: {len(df)} traces")
     return df[["trace_name", "source", "hdf5_path"]]
@@ -151,8 +175,9 @@ def build_event_sample(
     stead_df: pd.DataFrame,
 ) -> pd.DataFrame:
     """
-    For each magnitude bin, try to fill 50% from INSTANCE and 50% from STEAD.
-    Fall back gracefully if one source doesn't have enough.
+    For each magnitude bin:
+      - low/mid: try 50/50 INSTANCE vs STEAD split, fall back if one is short.
+      - high: take all available samples from both sources, no oversampling.
     """
     print("\nBuilding stratified event sample...")
     all_df = pd.concat([instance_df, stead_df], ignore_index=True)
@@ -161,19 +186,24 @@ def build_event_sample(
     result_frames = []
 
     for bin_name, target in BIN_TARGETS.items():
-        half = target // 2
-        bin_df = all_df[all_df["mag_bin"] == bin_name]
-
+        bin_df    = all_df[all_df["mag_bin"] == bin_name]
         inst_bin  = bin_df[bin_df["source"] == "instance"]
         stead_bin = bin_df[bin_df["source"] != "instance"]
 
-        print(f"\n  Bin '{bin_name}': {len(inst_bin)} INSTANCE | {len(stead_bin)} STEAD | target {target}")
+        # High bin: take everything, no oversampling
+        if target is None:
+            combined = bin_df.copy()
+            print(f"\n  Bin 'high': {len(inst_bin)} INSTANCE + {len(stead_bin)} STEAD "
+                  f"= {len(combined)} total (no oversampling)")
+            result_frames.append(combined)
+            continue
 
-        # Try 50/50 split
+        half         = target // 2
         inst_target  = half
         stead_target = target - half
 
-        # If one source falls short, take all of it and compensate from the other
+        print(f"\n  Bin '{bin_name}': {len(inst_bin)} INSTANCE | {len(stead_bin)} STEAD | target {target}")
+
         if len(inst_bin) < inst_target and len(stead_bin) >= stead_target:
             print(f"    INSTANCE short, taking all {len(inst_bin)} and pulling more from STEAD")
             inst_sample  = inst_bin
@@ -205,13 +235,17 @@ def build_event_sample(
 def extract_instance_waveform(
     h5: h5py.File, trace_name: str, p_idx: int
 ) -> Optional[np.ndarray]:
-    """Returns (3, 1000) float32 or None if trace is missing/short."""
+    """
+    Returns (3, 1000) float32 or None if trace is missing/short.
+    Window: [p_idx : p_idx + TOTAL]
+    Preprocessing: linear detrend + demean per channel.
+    """
     try:
-        w = h5["data"][trace_name][:]          # (3, N)
+        w    = h5["data"][trace_name][:]          # (3, N)
         clip = w[:, p_idx : p_idx + TOTAL]
         if clip.shape != (3, TOTAL):
             return None
-        return clip.astype(np.float32)
+        return _preprocess_clip(clip)
     except KeyError:
         return None
 
@@ -221,15 +255,16 @@ def extract_stead_waveform(
 ) -> Optional[np.ndarray]:
     """
     STEAD stores waveforms as (6000, 3) — time-first.
-    Transpose to (3, 6000) then slice to (3, 1000).
+    Transpose to (3, 6000) then slice window starting at P.
+    Preprocessing: linear detrend + demean per channel (idempotent on STEAD).
     """
     try:
-        w = h5["data"][trace_name][:]          # (6000, 3)
-        w = w.T                                # → (3, 6000)
+        w    = h5["data"][trace_name][:]          # (6000, 3)
+        w    = w.T                                # → (3, 6000)
         clip = w[:, p_idx : p_idx + TOTAL]
         if clip.shape != (3, TOTAL):
             return None
-        return clip.astype(np.float32)
+        return _preprocess_clip(clip)
     except KeyError:
         return None
 
@@ -238,21 +273,22 @@ def extract_noise_waveform(
     h5: h5py.File, trace_name: str, source: str
 ) -> Optional[np.ndarray]:
     """
-    For noise, no P arrival — take a fixed crop from the middle of the window.
-    STEAD noise is 6000 samples → crop [2500:3500] (middle 10 seconds).
-    INSTANCE noise length varies → crop [0:1000].
+    No P arrival for noise — fixed crop from the middle of the window.
+    STEAD noise: 6000 samples → crop [2500:3500] (middle 10 seconds at 100 Hz).
+    INSTANCE noise: channel-first, variable length → crop [0:1000].
+    Preprocessing: linear detrend + demean per channel.
     """
     try:
         w = h5["data"][trace_name][:]
         if "stead" in source:
-            w = w.T                            # (6000, 3) → (3, 6000)
+            w    = w.T                             # (6000, 3) → (3, 6000)
             clip = w[:, 2500:3500]
         else:
-            clip = w[:, :TOTAL]               # INSTANCE: channel-first already
+            clip = w[:, :TOTAL]                    # INSTANCE: channel-first already
 
         if clip.shape != (3, TOTAL):
             return None
-        return clip.astype(np.float32)
+        return _preprocess_clip(clip)
     except KeyError:
         return None
 
@@ -266,26 +302,23 @@ def write_events_memmap(event_df: pd.DataFrame, out_dir: str) -> int:
     Iterate event_df, open HDF5 files by group (avoid re-opening per row),
     write to memmap. Returns actual count written (skips bad traces).
     """
-    n_planned = len(event_df)
-    memmap_path = os.path.join(out_dir, "waveforms_events.bin")
+    n_planned    = len(event_df)
+    memmap_path  = os.path.join(out_dir, "waveforms_events.bin")
+    waveforms    = np.memmap(memmap_path, dtype="float32", mode="w+", shape=(n_planned, 3, TOTAL))
 
-    # Pre-allocate (may be slightly over if some traces are skipped)
-    waveforms = np.memmap(memmap_path, dtype="float32", mode="w+", shape=(n_planned, 3, TOTAL))
-
-    written = 0
-    skipped = 0
+    written           = 0
+    skipped           = 0
     current_hdf5_path = None
-    h5 = None
+    h5                = None
 
     print(f"\nExtracting {n_planned} event waveforms...")
 
     for i, row in event_df.iterrows():
-        # Only re-open HDF5 when the file changes
         if row["hdf5_path"] != current_hdf5_path:
             if h5 is not None:
                 h5.close()
             print(f"  Opening HDF5: {row['hdf5_path']}")
-            h5 = h5py.File(row["hdf5_path"], "r")
+            h5                = h5py.File(row["hdf5_path"], "r")
             current_hdf5_path = row["hdf5_path"]
 
         p_idx = int(row["p_arrival_sample"])
@@ -310,13 +343,13 @@ def write_events_memmap(event_df: pd.DataFrame, out_dir: str) -> int:
         h5.close()
 
     waveforms.flush()
-    del waveforms  # close the memmap
+    del waveforms
 
-    # Trim the memmap to actual written count
-    final = np.memmap(memmap_path, dtype="float32", mode="r", shape=(n_planned, 3, TOTAL))
+    # Trim memmap to actual written count
+    final        = np.memmap(memmap_path, dtype="float32", mode="r",  shape=(n_planned, 3, TOTAL))
     trimmed_path = memmap_path + ".trimmed"
-    trimmed = np.memmap(trimmed_path, dtype="float32", mode="w+", shape=(written, 3, TOTAL))
-    trimmed[:] = final[:written]
+    trimmed      = np.memmap(trimmed_path, dtype="float32", mode="w+", shape=(written, 3, TOTAL))
+    trimmed[:]   = final[:written]
     trimmed.flush()
     del final, trimmed
     os.replace(trimmed_path, memmap_path)
@@ -326,14 +359,14 @@ def write_events_memmap(event_df: pd.DataFrame, out_dir: str) -> int:
 
 
 def write_noise_memmap(noise_df: pd.DataFrame, out_dir: str) -> int:
-    n_planned = len(noise_df)
+    n_planned   = len(noise_df)
     memmap_path = os.path.join(out_dir, "waveforms_noise.bin")
-    waveforms = np.memmap(memmap_path, dtype="float32", mode="w+", shape=(n_planned, 3, TOTAL))
+    waveforms   = np.memmap(memmap_path, dtype="float32", mode="w+", shape=(n_planned, 3, TOTAL))
 
-    written = 0
-    skipped = 0
+    written           = 0
+    skipped           = 0
     current_hdf5_path = None
-    h5 = None
+    h5                = None
 
     print(f"\nExtracting {n_planned} noise waveforms...")
 
@@ -342,7 +375,7 @@ def write_noise_memmap(noise_df: pd.DataFrame, out_dir: str) -> int:
             if h5 is not None:
                 h5.close()
             print(f"  Opening HDF5: {row['hdf5_path']}")
-            h5 = h5py.File(row["hdf5_path"], "r")
+            h5                = h5py.File(row["hdf5_path"], "r")
             current_hdf5_path = row["hdf5_path"]
 
         clip = extract_noise_waveform(h5, row["trace_name"], row["source"])
@@ -365,10 +398,10 @@ def write_noise_memmap(noise_df: pd.DataFrame, out_dir: str) -> int:
     del waveforms
 
     # Trim
-    final = np.memmap(memmap_path, dtype="float32", mode="r", shape=(n_planned, 3, TOTAL))
+    final        = np.memmap(memmap_path, dtype="float32", mode="r",  shape=(n_planned, 3, TOTAL))
     trimmed_path = memmap_path + ".trimmed"
-    trimmed = np.memmap(trimmed_path, dtype="float32", mode="w+", shape=(written, 3, TOTAL))
-    trimmed[:] = final[:written]
+    trimmed      = np.memmap(trimmed_path, dtype="float32", mode="w+", shape=(written, 3, TOTAL))
+    trimmed[:]   = final[:written]
     trimmed.flush()
     del final, trimmed
     os.replace(trimmed_path, memmap_path)
@@ -395,7 +428,7 @@ def main():
 
     # ── 2. Stratified event sampling ─────────────────────────────────────
     event_sample = build_event_sample(instance_events, stead_events)
-    
+
     # Sort by hdf5_path so we open each file once in a sequential block
     event_sample = event_sample.sort_values("hdf5_path").reset_index(drop=True)
 
@@ -403,30 +436,30 @@ def main():
     noise_frames = [stead_noise]
     if instance_noise is not None:
         noise_frames.append(instance_noise)
-    all_noise = pd.concat(noise_frames, ignore_index=True)
+    all_noise    = pd.concat(noise_frames, ignore_index=True)
     noise_sample = _stratified_sample(all_noise, NOISE_TARGET)
     noise_sample = noise_sample.sort_values("hdf5_path").reset_index(drop=True)
 
     # ── 4. Write memmaps ─────────────────────────────────────────────────
     n_events_written = write_events_memmap(event_sample, OUT_DIR)
-    n_noise_written  = write_noise_memmap(noise_sample, OUT_DIR)
+    n_noise_written  = write_noise_memmap(noise_sample,  OUT_DIR)
 
-    # ── 5. Save clean metadata CSVs (aligned with memmap rows) ───────────
-    # Re-filter event_sample to only rows that were actually written
-    # (skipped rows break alignment — easiest fix: re-run alignment pass)
-    # We track written indices implicitly by saving the sorted df minus skips.
-    # For simplicity: save full sample df — the very rare skipped traces won't
-    # affect training materially, but log the count so you know.
+    # ── 5. Save metadata CSVs ────────────────────────────────────────────
     event_sample.to_csv(os.path.join(OUT_DIR, "metadata_events.csv"), index=False)
     noise_sample.to_csv(os.path.join(OUT_DIR, "metadata_noise.csv"),  index=False)
 
     # ── 6. Info file ─────────────────────────────────────────────────────
+    high_actual = int((event_sample["source_magnitude"] >= 5.0).sum())
     info = {
         "events": {
             "n_planned": len(event_sample),
             "n_written": n_events_written,
             "shape": [n_events_written, 3, TOTAL],
-            "bin_targets": BIN_TARGETS,
+            "bin_targets": {
+                "low":  BIN_TARGETS["low"],
+                "mid":  BIN_TARGETS["mid"],
+                "high": f"all available ({high_actual})",
+            },
         },
         "noise": {
             "n_planned": len(noise_sample),
