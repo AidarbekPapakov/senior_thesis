@@ -85,12 +85,21 @@ def _stratified_sample(df: pd.DataFrame, target: int, seed: int = 42) -> pd.Data
 
 def _preprocess_clip(clip: np.ndarray) -> np.ndarray:
     """
-    Apply linear detrend + demean per channel.
+    Apply linear detrend + demean + peak normalization per waveform.
     Input/output shape: (3, N) float32.
-    Idempotent — safe to apply to STEAD even though it's already preprocessed.
+    Both INSTANCE and STEAD already apply detrend + demean in their own pipelines,
+    so that part is idempotent — kept as a safety net for consistency.
+    Peak normalization is critical: INSTANCE is in raw digital counts,
+    STEAD is in physical units (m/s) — without this they are on completely
+    different amplitude scales.
     """
     clip = detrend(clip, axis=1, type="linear")
     clip -= clip.mean(axis=1, keepdims=True)
+
+    peak = np.abs(clip).max()
+    if peak > 0:
+        clip = clip / peak
+
     return clip.astype(np.float32)
 
 
