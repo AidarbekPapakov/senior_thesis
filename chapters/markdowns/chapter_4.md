@@ -63,7 +63,18 @@ Before we start the conversation on the datasets we have tested, we need to clar
 
 Moving to the datasets themselves, the authors of INSTANCE dataset provide a sample of the whole dataset that contains only 10,000 observations, which after our filtering is left with ~8,000 data instances. But as we have discussed with the STEAD dataset, this sample is heavily skewed towards lower bound of magnitude, which is not a bad thing, but in the context of our study is not quite the aim. Nevertheless, the proposed model was still tested on this sample. 
 
-The following part might seem a bit controversial and counter-intuitive at first, but we will explain the choices we have made. To test out approach, we sampled a portion of data from both datasets in even proportions. Eventually, we have a dataset consisting of 75,000 (37,500 from INSTANCES and 37,500 from STEAD) actual events, each being represented by a 3-componenet waveforms with an assigned magnitude value. Here is the controversial part comes: instead of random sampling from both datasets
+The following part might seem a bit controversial and counter-intuitive at first, but we will explain the choices we have made. To test out approach, we sampled a portion of data from both datasets in even proportions. Eventually, we have a dataset consisting of ~50,000 (~25,000 from INSTANCES and `25,000 from STEAD) actual events, each being represented by a 3-componenet waveforms with an assigned magnitude value. Here is the controversial part comes: instead of sampling waveforms from both datasets randomly we decided to deal with data imbalance right away. 
+
+We have alredy risen the topic regarding the nature of earthquakes' magnitudes distribution, as both datasets contain only real recordings without any oversampling and synthetic data generation, the distribution of magnitudes is heavily skewed towards lower values (M2.0-3.0). As you can see on the histogram of INSTANCE's sample's magnitude distribution on fig. <TODO>.
+
+Because our main goal is to estimate how well can be the relationship between the first several seconds of observations of P-waves and source's magnitude it is not ideal for us to center out focus at these high-density cluster of magnitude values. 
+
+In machine learning, there are different ways to approach data imbalance issue, oversampling and undersampling. 
+Oversampling means inflating the number of data instances in the deficit class, while undersampling represents the idea of removing the data instances from the classes with prevailing number of data.
+
+<MAYBE>Oversampling with augmented samples</MAYBE>
+
+Due to the lack of exepertise in the seismic field which could potentially introduce the bias in the final dataset during data synthesis, it was ultimately decided to undersample the other "classes". Finally, out dataset contains: 25,000 earthquake waveforms of magniture in the range M1.0-3.0, 25,000 in the range M3.0-5.0 and ~3,500 data instances (all the observations from both datasets) of M5.0>.
 
 
 ## 4.3 Preprocessing Pipeline
