@@ -60,7 +60,7 @@ class INSTANCESeismicDataset(Dataset):
         df = pd.read_csv(csv_path)
         df = df.dropna(subset=['source_magnitude'])
         df = df[df['trace_eval_P'] == 'manual']
-        df = df[df['station_channels'].isin(['HN', 'HH'])]
+        df = df[df['station_channels'].isin(['EH', 'HH'])]
         df = df[(df['trace_npts'] - df['trace_P_arrival_sample']) >= self.total_samples]
         
         # Train/Val/Test split
