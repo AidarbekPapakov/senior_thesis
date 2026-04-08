@@ -622,7 +622,7 @@ if __name__ == "__main__":
         run_experiment(
             csv_path=csv_file,
             hdf5_path=hdf5_file,
-            experiment_name=f'magnitude_pred_{length}_samples',
+            experiment_name=f'INSTANCE/sample_10k/magnitude_pred_{length}_samples',
             target_length=length,
             pad_length=pad_needed,
             batch_size=512,
@@ -630,6 +630,6 @@ if __name__ == "__main__":
             train_split=0.7, # 70% Train
             val_split=0.2,   # 20% Val, leaving implicit 10% for Test
             scheduler_alg='cos',
-            epochs=300,
+            epochs=500,
             no_progress_crash_out=100
         )
