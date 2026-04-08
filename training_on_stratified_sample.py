@@ -606,7 +606,8 @@ def run_experiment(
 
 if __name__ == "__main__":
 
-    DATA_DIR: str = '/home/aidar/study/senior_thesis/data/unified'
+    DATA_DIR: str = '/home/aidar/study/senior_thesis/data/mixed/raw_amplitude'
+    DATASET_NAME: str = os.path.join(DATA_DIR.split('/')[-2], DATA_DIR.split('/')[-1])
     info_file: str = 'info.json' 
     waveforms_events_file: str = 'waveforms_events.bin'
     metadata_events_file: str = 'metadata_events.csv'
@@ -614,7 +615,7 @@ if __name__ == "__main__":
     with open(os.path.join(DATA_DIR, info_file)) as f:
         info = json.load(f)
 
-    n_samples = info['events']['n_written']  # 75000
+    n_samples = info['events']['n_written']
 
     # We test the 3-second, 5-second, and 8-second extraction here
     target_lengths: List[int] = [
@@ -633,11 +634,11 @@ if __name__ == "__main__":
             memmap_path=os.path.join(DATA_DIR, waveforms_events_file),
             csv_path=os.path.join(DATA_DIR, metadata_events_file),
             n_samples=n_samples,
-            experiment_name=f'magnitude_pred_{length}_samples',
+            experiment_name=os.path.join(DATASET_NAME, f'magnitude_pred_{length}_samples'),
             target_length=length,
             pad_length=pad_needed,
             batch_size=512,
-            lr=3e-4,
+            lr=4e-3,
             train_split=0.7,
             val_split=0.2,
             # test = 0.1 implicitly
