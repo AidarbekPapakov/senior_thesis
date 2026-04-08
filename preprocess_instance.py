@@ -50,7 +50,7 @@ INSTANCE_NOISE_HDF5 = None  # e.g. "/mnt/d/.../Instance_noise_gm.hdf5" if you ha
 STEAD_DIR    = "/mnt/d/Downloads/Senior_Thesis/STEAD/unzipped"
 STEAD_CHUNKS = [f"chunk{i}" for i in range(1, 7)]
 
-OUT_DIR = "/home/aidar/study/senior_thesis/data/mixed"
+OUT_DIR = "/home/aidar/study/senior_thesis/data/INSTANCE"
 TOTAL   = 1000   # total samples per waveform window
 
 # Stratified event targets (per bin, across both datasets combined)
@@ -95,7 +95,7 @@ def _preprocess_clip(clip: np.ndarray) -> np.ndarray:
     """
     clip = detrend(clip, axis=1, type="linear")
     clip -= clip.mean(axis=1, keepdims=True)
-
+    
     peak = np.abs(clip).max()
     if peak > 0:
         clip = clip / peak
@@ -179,63 +179,45 @@ def load_instance_noise(csv_path: str, hdf5_path: str) -> pd.DataFrame:
 #  STRATIFIED EVENT SAMPLING
 # ─────────────────────────────────────────────
 
-def build_event_sample(instance_df: pd.DataFrame, stead_df: pd.DataFrame) -> pd.DataFrame:
+def build_event_sample(instance_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Combined INSTANCE + STEAD sampling:
-        low  → 50k total
-        mid  → 50k total
+    INSTANCE-only sampling:
+        low  → 50k
+        mid  → 50k
         high → all available (no oversampling)
-
-    Try 50/50 split per bin when possible.
     """
-    print("\nBuilding combined INSTANCE + STEAD sample...")
+    print("\nBuilding INSTANCE-only stratified sample...")
 
-    all_df = pd.concat([instance_df, stead_df], ignore_index=True)
-    all_df["mag_bin"] = all_df["source_magnitude"].apply(_mag_bin)
+    df = instance_df.copy()
+    df["mag_bin"] = df["source_magnitude"].apply(_mag_bin)
 
     result_frames = []
 
-    for bin_name, target in BIN_TARGETS.items():
-        bin_df    = all_df[all_df["mag_bin"] == bin_name]
-        inst_bin  = bin_df[bin_df["source"] == "instance"]
-        stead_bin = bin_df[bin_df["source"] != "instance"]
+    TARGETS = {
+        "low": 50_000,
+        "mid": 50_000,
+        "high": None,
+    }
 
-        print(f"\n  Bin '{bin_name}': {len(inst_bin)} INSTANCE | {len(stead_bin)} STEAD")
+    for bin_name, target in TARGETS.items():
+        bin_df = df[df["mag_bin"] == bin_name]
+
+        print(f"\n  Bin '{bin_name}': {len(bin_df)} available")
 
         if target is None:
-            combined = bin_df
-            print(f"    Taking all {len(combined)} (no oversampling)")
-            result_frames.append(combined)
-            continue
-
-        half = target // 2
-        inst_target  = half
-        stead_target = target - half
-
-        # Handle shortages
-        if len(inst_bin) < inst_target:
-            print(f"    INSTANCE short ({len(inst_bin)}), compensating with STEAD")
-            inst_sample  = inst_bin
-            stead_target = target - len(inst_bin)
-            stead_sample = _stratified_sample(stead_bin, stead_target)
-        elif len(stead_bin) < stead_target:
-            print(f"    STEAD short ({len(stead_bin)}), compensating with INSTANCE")
-            stead_sample = stead_bin
-            inst_target  = target - len(stead_bin)
-            inst_sample  = _stratified_sample(inst_bin, inst_target)
+            # take everything
+            sampled = bin_df
+            print(f"    Taking all {len(sampled)} (no oversampling)")
         else:
-            inst_sample  = _stratified_sample(inst_bin, inst_target)
-            stead_sample = _stratified_sample(stead_bin, stead_target)
+            sampled = _stratified_sample(bin_df, target)
+            print(f"    Sampled {len(sampled)}")
 
-        combined = pd.concat([inst_sample, stead_sample], ignore_index=True)
-        print(f"    Sampled {len(combined)} ({len(inst_sample)} INST + {len(stead_sample)} STEAD)")
-
-        result_frames.append(combined)
+        result_frames.append(sampled)
 
     final = pd.concat(result_frames, ignore_index=True)
     final = final.sample(frac=1, random_state=42).reset_index(drop=True)
 
-    print(f"\nTotal sample: {len(final)}")
+    print(f"\nTotal INSTANCE sample: {len(final)}")
     return final
 
 
@@ -438,7 +420,7 @@ def main():
         instance_noise = load_instance_noise(INSTANCE_NOISE_CSV, INSTANCE_NOISE_HDF5)
 
     # ── 2. Stratified event sampling ─────────────────────────────────────
-    event_sample = build_event_sample(instance_events, stead_events)
+    event_sample = build_event_sample(instance_events)
 
     # Sort by hdf5_path so we open each file once in a sequential block
     event_sample = event_sample.sort_values("hdf5_path").reset_index(drop=True)
