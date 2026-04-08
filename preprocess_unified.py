@@ -50,7 +50,7 @@ INSTANCE_NOISE_HDF5 = None  # e.g. "/mnt/d/.../Instance_noise_gm.hdf5" if you ha
 STEAD_DIR    = "/mnt/d/Downloads/Senior_Thesis/STEAD/unzipped"
 STEAD_CHUNKS = [f"chunk{i}" for i in range(1, 7)]
 
-OUT_DIR = "/home/aidar/study/senior_thesis/data/mixed"
+OUT_DIR = "/home/aidar/study/senior_thesis/data/mixed/raw_amplitude"
 TOTAL   = 1000   # total samples per waveform window
 
 # Stratified event targets (per bin, across both datasets combined)
@@ -95,10 +95,12 @@ def _preprocess_clip(clip: np.ndarray) -> np.ndarray:
     """
     clip = detrend(clip, axis=1, type="linear")
     clip -= clip.mean(axis=1, keepdims=True)
+    
+    # peak = np.abs(clip).max()
+    # log_peak = np.log(peak + 1e-8)
 
-    peak = np.abs(clip).max()
-    if peak > 0:
-        clip = clip / peak
+    # clip = clip / (peak + 1e-8)
+    # clip *= log_peak
 
     return clip.astype(np.float32)
 
