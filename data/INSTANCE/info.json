@@ -1,16 +1,16 @@
 {
   "events": {
-    "n_planned": 75000,
-    "n_written": 75000,
+    "n_planned": 101272,
+    "n_written": 101272,
     "shape": [
-      75000,
+      101272,
       3,
       1000
     ],
     "bin_targets": {
-      "low": 25000,
-      "mid": 25000,
-      "high": 25000
+      "low": 50000,
+      "mid": 50000,
+      "high": "all available (1272)"
     }
   },
   "noise": {
