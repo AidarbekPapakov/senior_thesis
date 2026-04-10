@@ -606,7 +606,7 @@ def run_experiment(
 
 if __name__ == "__main__":
 
-    DATA_DIR: str = '/home/aidar/study/senior_thesis/data/mixed/raw_amplitude'
+    DATA_DIR: str = '/home/aidar/study/senior_thesis/data/INSTANCE/raw_amplitude'
     DATASET_NAME: str = os.path.join(DATA_DIR.split('/')[-2], DATA_DIR.split('/')[-1])
     info_file: str = 'info.json' 
     waveforms_events_file: str = 'waveforms_events.bin'
@@ -621,7 +621,8 @@ if __name__ == "__main__":
     target_lengths: List[int] = [
         300, 
         500, 
-        800
+        800,
+        1000
     ] 
     
     for length in target_lengths:
@@ -638,12 +639,13 @@ if __name__ == "__main__":
             target_length=length,
             pad_length=pad_needed,
             batch_size=512,
-            lr=4e-3,
+            lr=5e-4,
+            weight_decay=1e-3,
             train_split=0.7,
             val_split=0.2,
             # test = 0.1 implicitly
             scheduler_alg='exp',
             exp_lr_scheduler=0.998,
             epochs=500,
-            no_progress_crash_out=100
+            no_progress_crash_out=500
         )
