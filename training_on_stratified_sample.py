@@ -606,7 +606,7 @@ def run_experiment(
 
 if __name__ == "__main__":
 
-    DATA_DIR: str = '/home/aidar/study/senior_thesis/data/INSTANCE/raw_amplitude'
+    DATA_DIR: str = '/home/aidar/study/senior_thesis/data/INSTANCE/peak_normalized'
     DATASET_NAME: str = os.path.join(DATA_DIR.split('/')[-2], DATA_DIR.split('/')[-1])
     info_file: str = 'info.json' 
     waveforms_events_file: str = 'waveforms_events.bin'
