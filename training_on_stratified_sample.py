@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 import torchaudio.transforms as T
 from torchmetrics.regression import (
@@ -118,24 +119,41 @@ class SeismicCNNBackbone(nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.conv_block = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=(5, 3), padding=(2, 1)),  # 3 channels in
+            nn.Conv2d(3, 16, kernel_size=(5, 3), padding=(2, 1)),
             nn.BatchNorm2d(16),
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=(2, 1)), 
+            nn.Dropout2d(0.2),              # 2D dropout for conv layers
+            nn.MaxPool2d(kernel_size=(2, 1)),
             nn.Conv2d(16, 32, kernel_size=(3, 3), padding=(1, 1)),
             nn.BatchNorm2d(32),
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=(2, 2)), 
+            nn.Dropout2d(0.2),
+            nn.MaxPool2d(kernel_size=(2, 2)),
             nn.Conv2d(32, 64, kernel_size=(3, 3), padding=(1, 1)),
             nn.BatchNorm2d(64),
             nn.ReLU(),
-            nn.AdaptiveAvgPool2d((1, 16)) 
+            nn.Dropout2d(0.2),
+            nn.AdaptiveAvgPool2d((1, 16))
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv_block(x) 
         x = x.squeeze(2)      
         return x
+
+
+class AttentionPooling(nn.Module):
+
+    def __init__(self, hidden_size: int) -> None:
+        super().__init__()
+        self.score = nn.Linear(hidden_size, 1, bias=False)
+
+    def forward(self, lstm_out: torch.Tensor) -> torch.Tensor:
+        # lstm_out: (batch, seq_len, hidden_size)
+        weights = F.softmax(self.score(lstm_out), dim=1)  # (batch, seq_len, 1)
+        pooled  = (weights * lstm_out).sum(dim=1)         # (batch, hidden_size)
+        return pooled
+
 
 class SeismicMagnitudePredictor(nn.Module):
     def __init__(self) -> None:
@@ -156,6 +174,8 @@ class SeismicMagnitudePredictor(nn.Module):
 
         self.lstm = nn.LSTM(input_size=64, hidden_size=64, num_layers=1, batch_first=True)
 
+        self.attention_pool = AttentionPooling(hidden_size=64)
+
         self.mlp = nn.Sequential(
             nn.Linear(64, 64),
             nn.ReLU(),
@@ -173,9 +193,11 @@ class SeismicMagnitudePredictor(nn.Module):
         lstm_input = feats.permute(0, 2, 1) # (batch, 16, 64)
 
         lstm_out, _ = self.lstm(lstm_input)
-        last_time_step = lstm_out[:, -1, :] # (batch, 64)
 
-        magnitude_pred = self.mlp(last_time_step)   # (batch, 1)
+        # Attention pool over all 16 steps instead of grabbing just the last one
+        context = self.attention_pool(lstm_out)
+
+        magnitude_pred = self.mlp(context)
         return magnitude_pred
 
 
@@ -187,7 +209,7 @@ def run_experiment(
     target_length: int = 1000,
     pad_length: int = 0,
     batch_size: int = 64,
-    loss_function: Literal['MSE', 'HuberLoss'] = 'MSE',
+    loss_function: Literal['MSE', 'HuberLoss'] = 'HuberLoss',
     lr: float = 1e-3,
     weight_decay: float = 1e-5,
     train_split: float = 0.7,
@@ -640,12 +662,12 @@ if __name__ == "__main__":
             pad_length=pad_needed,
             batch_size=512,
             lr=5e-4,
-            weight_decay=1e-3,
+            weight_decay=4e-3,
             train_split=0.7,
             val_split=0.2,
             # test = 0.1 implicitly
             scheduler_alg='exp',
-            exp_lr_scheduler=0.998,
+            exp_lr_scheduler=0.990,
             epochs=500,
             no_progress_crash_out=500
         )
