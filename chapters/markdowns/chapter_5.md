@@ -2,25 +2,26 @@
 
 ## 5.1 Overview of the Model Pipeline
 
-The goal of the proposed model is to estimate earthquake magnitude using only the first few seconds of seismic waveform data following the arrival of the P-wave. The model operates on spectrogram representations derived from three-component seismic recordings.
+The goal of the proposed method is to estimate earthquake magnitude using only the first few seconds of seismic waveforms right after the arrival of the P-wave. Rather than relying on CPU-bound preprocessing, the model ingests raw temporal waveforms and dynamically computes spectrograms on the GPU.
 
-The overall architecture combines convolutional neural networks for spatial feature extraction with a recurrent neural network for modeling temporal dynamics.
+The overall architecture combines a CNN for spatial feature extraction, an LSTM block for modeling temporal changes, and an attention mechanism to intelligently pool the temporal sequence before final regression.
 
-The processing pipeline can be summarized as:
-```
-Input waveform
+The processing pipeline can be depicted as follows:
+
+```text
+Raw input waveforms
       ↓
-Spectrogram generation
+On-device STFT & Log1p scaling
       ↓
 CNN backbone (spatial feature extraction)
       ↓
-Feature sequence reshaping
-      ↓
 LSTM (temporal modeling)
       ↓
-Fully connected regression head
+Attention pooling (context vector aggregation)
       ↓
-Predicted magnitude
+MLP (regression head)
+      ↓
+Scalar magnitude value
 ```
 
 Formally, the model can be expressed as a function:
@@ -28,204 +29,119 @@ Formally, the model can be expressed as a function:
 $$\hat{M} = f_\theta(X)$$
 
 where
+* $X$ is the raw three-component seismic waveform.
+* $\theta$ is the set of learnable parameters.
+* $\hat{M}$ is the predicted earthquake magnitude.
 
-- $X$ is the spectrogram tensor,
-- $\theta$ represents the model parameters, and
-- $\hat{M}$ is the predicted earthquake magnitude.
-
-The architecture is designed to exploit two important properties of seismic signals:
-
-- **Spectral structure** — frequency content varies during earthquake rupture.
-- **Temporal evolution** — signal characteristics evolve during the first seconds after P-wave arrival.
-
-Convolutional layers capture the spatial structure of the spectrogram, while the recurrent component models the temporal progression of extracted features.
-
-*[Figure 5.1: Overview diagram of the CNN–LSTM architecture]*
+The architecture is built on two primary premises:
+* **Spectral structure** — frequencies vary distinctively during an earthquake.
+* **Temporal evolution** — signal characteristics evolve crucially during the first seconds after P-wave arrival.
 
 ## 5.2 Input Representation
 
-The input to the neural network is a spectrogram computed from a three-component seismic waveform.
+The input to the neural network is a raw three-component seismic waveform tensor of shape `(Batch, 3, 1000)`. 
 
-Following the preprocessing steps described in Chapter 4, the model input can be represented as:
+To maximize GPU utilization and avoid computational bottlenecks, the Short-Time Fourier Transform (STFT) is implemented directly within the model's forward pass using PyTorch's audio transforms. The STFT is configured with:
+* `n_fft`: 128
+* `win_length`: 128
+* `hop_length`: 38
+* `window_fn`: Hann window
 
-$$X \in \mathbb{R}^{C \times F \times T}$$
+Following the transformation, a logarithmic scaling $\log(1 + x)$ is applied to compress the dynamic range of the seismic energy. The resulting spectrogram tensor has the shape:
 
-where
+$$S \in \mathbb{R}^{3 \times F \times T}$$
 
-- $C = 3$ represents the three seismic components,
-- $F$ represents the number of frequency bins, and
-- $T$ represents the number of time frames.
-
-Typical values for these parameters depend on the STFT configuration and the observation window length $W$.
-
-Placeholder values:
-
-$$F = \text{[to be determined]}$$
-$$T = \text{[depends on window size and hop length]}$$
-
-The input tensor is treated analogously to a multi-channel image where the frequency dimension corresponds to image height and the time dimension corresponds to image width. This representation enables the use of convolutional neural networks for feature extraction.
+Given the STFT configuration and input length, the parameters resolve exactly to $F = 65$ frequency bins and $T = 24$ time frames. This output tensor is treated similarly to a 3-channel RGB image, allowing the CNN backbone to extract meaningful spatial patterns.
 
 ## 5.3 CNN Backbone
 
-### 5.3.1 Motivation
+### 5.3.1 Convolutional Block Structure
 
-Spectrograms contain structured patterns that correspond to physical characteristics of seismic waves. For example:
+The CNN backbone consists of a sequence of convolutional blocks designed to distill the $65 \times 24$ spectrogram into a dense feature representation. Each of the three blocks follows a standard deep learning pattern:
 
-- sudden broadband energy increases often correspond to P-wave arrivals,
-- frequency bands may shift during rupture propagation, and
-- noise and background vibrations produce characteristic textures.
-
-CNNs are well suited for detecting such patterns because they learn local filters that respond to spatial structures in the input.
-
-### 5.3.2 Convolutional Block Structure
-
-The CNN backbone consists of a sequence of convolutional blocks. Each block has the following structure:
-```
-Conv2D → BatchNorm → ReLU → MaxPooling
+```text
+Conv2D → BatchNorm2D → ReLU → MaxPool2D
 ```
 
-This design is widely used in deep learning because it stabilizes training while progressively extracting higher-level features.
+At the end of the convolutional sequence, an `AdaptiveAvgPool2D` layer guarantees a fixed spatial output shape of $1 \times 16$, ensuring downstream compatibility regardless of minor input length variations.
 
-The architecture can be expressed as:
-```
-Input spectrogram
-      ↓
-Conv Block 1
-      ↓
-Conv Block 2
-      ↓
-Conv Block 3
-      ↓
-Conv Block [N]
-      ↓
-Feature tensor
-```
+### 5.3.2 Layer Configuration
 
-Placeholder for number of blocks:
+The exact configuration of the convolutional layers is structured to progressively increase channel depth while reducing spatial dimensions:
 
-$$N = \text{[to be determined experimentally]}$$
-
-### 5.3.3 Layer Configuration (Placeholder)
-
-The exact configuration of convolutional layers will be determined through empirical experimentation. The following table illustrates the intended structure.
-
-| Layer | Channels | Kernel Size | Stride | Output Shape |
-|-------|----------|-------------|--------|--------------|
-| Conv1 | [C1] | [k1 × k1] | [s1] | [ ] |
-| Conv2 | [C2] | [k2 × k2] | [s2] | [ ] |
-| Conv3 | [C3] | [k3 × k3] | [s3] | [ ] |
-| Conv4 | [C4] | [k4 × k4] | [s4] | [ ] |
-
-Placeholders to determine during experiments: number of channels $C_i$, kernel sizes $k_i$, pooling stride, and padding scheme.
-
-### 5.3.4 Receptive Field
-
-An important property of CNNs is the **receptive field**, which describes how large a region of the input affects a single output neuron.
-
-For a sequence of convolution layers with kernel sizes $k_l$ and strides $s_l$, the receptive field after $L$ layers is:
-
-$$r_L = 1 + \sum_{l=1}^{L} (k_l - 1) \prod_{j=1}^{l-1} s_j$$
-
-The receptive field should ideally span a meaningful portion of the spectrogram, allowing the network to detect patterns across both time and frequency.
-
-Placeholder:
-
-$$r_L = \text{[to be computed after final architecture is chosen]}$$
+| Layer | Channels | Kernel Size | Stride | Padding | Pooling |
+|-------|----------|-------------|--------|---------|---------|
+| Conv1 | 16 | 5 × 3 | 1 | 2 × 1 | Max (2 × 1) |
+| Conv2 | 32 | 3 × 3 | 1 | 1 × 1 | Max (2 × 2) |
+| Conv3 | 64 | 3 × 3 | 1 | 1 × 1 | AdaptiveAvg (1 × 16) |
 
 ## 5.4 Feature Sequence Extraction
 
-After passing through the CNN backbone, the resulting feature map has the shape:
+After passing through the CNN backbone and the adaptive pooling layer, the resulting feature map has the shape:
 
 $$Z \in \mathbb{R}^{C' \times F' \times T'}$$
 
-To feed this representation into an LSTM, the feature map must be converted into a sequence of vectors. This is achieved by collapsing the frequency dimension into the channel dimension:
+Specifically, $C' = 64$, $F' = 1$, and $T' = 16$. The frequency dimension is squeezed out, leaving a tensor of shape `(Batch, 64, 16)`. 
+
+To feed this representation into the recurrent network, the tensor is permuted to swap the channel and time dimensions, yielding a sequence of vectors:
 
 $$Z' \in \mathbb{R}^{T' \times D}$$
 
-where $D = C' \times F'$.
-
-Each time step in the sequence therefore represents the spectral feature representation extracted from a specific time frame of the input spectrogram.
+where $T' = 16$ time steps and $D = 64$ features. Each time step in the sequence represents the condensed spectral feature representation extracted from a specific segment of the input waveform.
 
 ## 5.5 LSTM Module
 
 ### 5.5.1 Motivation
 
-While CNNs capture spatial patterns in spectrograms, they do not explicitly model the temporal evolution of the signal.
-
-However, earthquake magnitude is strongly related to the way seismic energy evolves over time. For example, large earthquakes often exhibit sustained increases in signal energy during the early rupture phase. An LSTM network can capture such temporal dependencies.
+While CNNs capture local time-frequency patterns in the spectrograms, they do not explicitly model the longer-term temporal evolution of the signal. Earthquake magnitude is strongly related to how seismic energy evolves over time (e.g., sustained increases in energy during the rupture phase).
 
 ### 5.5.2 LSTM Architecture
 
-The LSTM receives the sequence:
+The model utilizes a single-layer Long Short-Term Memory (LSTM) network to process the sequence:
 
-$$Z' = (z_1, z_2, \ldots, z_{T'})$$
+$$Z' = (z_1, z_2, \ldots, z_{16})$$
 
-where each vector $z_t$ represents features extracted from the CNN. The LSTM processes the sequence iteratively according to the equations introduced in Chapter 3.
-
-Placeholder configuration:
-
-| Parameter | Value |
-|-----------|-------|
-| LSTM layers | [to be determined] |
-| Hidden size | [$H_{\text{lstm}}$] |
-| Dropout | [$p_{\text{dropout}}$] |
+The LSTM has a hidden size of $H_{\text{lstm}} = 64$ and outputs a sequence of hidden states corresponding to each of the 16 time steps.
 
 ### 5.5.3 Directionality
 
-The model uses a **unidirectional** LSTM rather than a bidirectional one.
+The model intentionally uses a **unidirectional** LSTM with `batch_first=True` rather than a bidirectional one. While bidirectional networks often improve modeling capacity, they require access to future time steps. In a real-time Earthquake Early Warning (EEW) system, future data is not available. Therefore, causal inference dictates a unidirectional architecture.
 
-Bidirectional recurrent networks process sequences in both forward and backward directions. While this improves modeling capacity, it requires access to future time steps. In a real-time earthquake early warning system, future data is not available. Therefore, a unidirectional LSTM is the appropriate architecture for causal inference.
+## 5.6 Attention Pooling Mechanism
 
-## 5.6 Regression Head
+Rather than relying solely on the final hidden state of the LSTM—which may suffer from information bottlenecking—the model employs an Attention Pooling mechanism over all 16 time steps. 
 
-The final hidden state of the LSTM contains a condensed representation of the seismic signal. This vector is passed through a small fully connected network that outputs the predicted earthquake magnitude.
+A linear scoring layer projects each hidden state into a scalar weight. These weights are passed through a softmax function to create a probability distribution over the sequence:
 
-Proposed structure:
-```
-FC → ReLU → FC → Output
-```
+$$\alpha_t = \text{softmax}(W \cdot h_t)$$
 
-Placeholder architecture:
+where $h_t$ is the LSTM output at time $t$, and $W$ is a learnable weight matrix. The final context vector $C$ is computed as the weighted sum of all LSTM hidden states:
 
-| Layer | Size |
-|-------|------|
-| FC1 | $H_{\text{lstm}} \to H_{\text{fc}}$ |
-| FC2 | $H_{\text{fc}} \to 1$ |
+$$C = \sum_{t=1}^{T'} \alpha_t h_t$$
+
+This allows the network to dynamically focus on the most critical moments of the P-wave arrival when estimating the overall magnitude.
+
+## 5.7 Regression Head
+
+The attention-pooled context vector, containing the most salient seismic features, is passed through a Multi-Layer Perceptron (MLP) to output the predicted magnitude. 
+
+The regression head utilizes the following architecture:
+
+| Layer | Type | Configuration |
+|-------|------|---------------|
+| 1 | Linear | 64 → 64 |
+| 2 | Activation | ReLU |
+| 3 | Dropout | $p = 0.4$ |
+| 4 | Linear | 64 → 1 |
 
 The final output layer produces the scalar magnitude estimate:
 
 $$\hat{M} \in \mathbb{R}$$
 
-No activation function is applied at the output layer since magnitude prediction is a regression task.
+No activation function is applied at the output node, as magnitude prediction is treated as a continuous regression task. The inclusion of a robust 40% dropout rate helps prevent overfitting on the dense layers.
 
-## 5.7 Parameter Count
+## 5.8 Summary
 
-The total number of model parameters depends on the final architecture configuration. In general, the parameter count can be approximated as:
+This chapter detailed the finalized architecture of the proposed CNN–LSTM model for earthquake magnitude estimation. 
 
-$$P_{\text{total}} = P_{\text{CNN}} + P_{\text{LSTM}} + P_{\text{FC}}$$
-
-where $P_{\text{CNN}}$ is the number of convolutional parameters, $P_{\text{LSTM}}$ is the number of recurrent parameters, and $P_{\text{FC}}$ is the number of parameters in the regression head.
-
-Placeholder:
-
-$$P_{\text{total}} = \text{[to be computed after architecture selection]}$$
-
-## 5.8 Computational Complexity and Inference Time
-
-For earthquake early warning applications, inference latency is an important consideration. Let $T_{\text{CNN}}$ denote the time required for CNN inference, $T_{\text{LSTM}}$ denote the time required for LSTM processing, and $T_{\text{FC}}$ denote the time required for the regression head. The total inference time is:
-
-$$T_{\text{total}} = T_{\text{CNN}} + T_{\text{LSTM}} + T_{\text{FC}}$$
-
-A practical EEW system typically requires inference to occur within a fraction of a second.
-
-Placeholder target:
-
-$$T_{\text{total}} < \text{[target latency]}$$
-
-## 5.9 Summary
-
-This chapter presented the architecture of the proposed CNN–LSTM model for earthquake magnitude estimation.
-
-The model processes spectrogram representations of three-component seismic waveforms using convolutional layers to extract spatial features and a recurrent network to model temporal dynamics.
-
-Because the optimal architecture configuration depends on experimental evaluation, several hyperparameters—including convolutional channel counts, kernel sizes, and LSTM dimensions—are intentionally left as placeholders. These values will be determined through systematic experimentation described in the next chapter.
+The model optimizes inference by computing spectrograms directly on-device before processing them through a 3-block convolutional backbone. Temporal dynamics are captured via a unidirectional LSTM, and an attention pooling mechanism is introduced to intelligently aggregate the temporal sequence. Finally, a robust regression MLP translates this condensed representation into a single magnitude estimate.

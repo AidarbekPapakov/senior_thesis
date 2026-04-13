@@ -12,9 +12,9 @@ Where numerical results are required, placeholders are used and should be replac
 
 ### 7.2.1 Overall Performance
 
-The overall performance of the model is evaluated using the metrics defined in Chapter 3: Root Mean Squared Error (RMSE), Mean Absolute Error (MAE), coefficient of determination ($R^2$), and Pearson correlation coefficient.
+The performance of the model is thus evaluated using the metrics defined in Chapter 3: Root Mean Squared Error (RMSE), Mean Absolute Error (MAE), coefficient of determination ($R^2$), and Pearson correlation coefficient.
 
-Based on the experimental results (see Chapter 6), the model achieved:
+The best performing model achieved the following metrics in the test set:
 
 | Metric | Value |
 |--------|-------|
@@ -23,41 +23,13 @@ Based on the experimental results (see Chapter 6), the model achieved:
 | $R^2$ | [value] |
 | Pearson $r$ | [value] |
 
-These results indicate that the model is capable of [insert interpretation: e.g., "accurately capturing the relationship between early waveform features and earthquake magnitude"].
-
-If the correlation coefficient is high (e.g., $r > 0.8$), this suggests that the model successfully learns a strong linear relationship between predicted and true magnitudes.
+From these results we can draw a conclusion that model has learnt to capturing the relationship between early waveform features and earthquake ultimate magnitude.
 
 ### 7.2.2 Error Characteristics
 
-The distribution of prediction errors provides additional insight into model behavior.
+We also provide the distribution of residuals of predictions, which adds more insight into model's performance.
 
-From the error histogram (Figure [X]), the model tends to [underestimate / overestimate] magnitudes in the range [range], and the variance of errors increases for [larger / smaller] magnitudes. This behavior is consistent with the imbalance in the dataset, where larger earthquakes are underrepresented.
-
-### 7.2.3 Performance on High-Magnitude Events
-
-A key requirement of earthquake early warning systems is reliable performance on large earthquakes.
-
-For events with magnitude $M \geq 5.0$, the model achieved:
-
-| Metric | Value |
-|--------|-------|
-| RMSE | [value] |
-| MAE | [value] |
-
-If performance degrades in this regime, it may indicate that the training dataset lacks sufficient high-magnitude examples, or that the model struggles to extrapolate beyond the dominant magnitude range. This limitation is expected due to the Gutenberg–Richter distribution discussed earlier.
-
-## 7.3 Impact of Model Architecture
-
-### 7.3.1 CNN–LSTM vs CNN-only
-
-The ablation study comparing CNN-only and CNN–LSTM architectures shows that:
-
-| Architecture | RMSE |
-|--------------|------|
-| CNN-only | [value] |
-| CNN–LSTM | [value] |
-
-If the CNN–LSTM model performs better, this confirms that temporal modeling improves magnitude estimation. This result suggests that the temporal evolution of seismic signals contains important information that cannot be captured by purely spatial feature extraction.
+From the histogram (Figure [X]), it is seen that the model has zero bias (average residual close to zero) and a moderate deviation.
 
 ### 7.3.2 Effect of Window Length
 
@@ -73,58 +45,30 @@ In general, increasing the window length leads to [improved / marginally improve
 
 Thus, there exists a trade-off between prediction accuracy and response time, which is critical for practical EEW systems.
 
-## 7.4 Impact of Dataset Choice
-
-### 7.4.1 Multi-Dataset Training
-
-The comparison between single-dataset and multi-dataset training shows that:
-
-| Training Data | RMSE |
-|---------------|------|
-| STEAD only | [value] |
-| STEAD + INSTANCE | [value] |
-
-If performance improves when combining datasets, this indicates that the model benefits from increased data diversity and that learned representations generalize better across different seismic conditions.
-
-### 7.4.2 Regional Fine-Tuning
-
-Fine-tuning on CAIAG data results in:
-
-| Stage | RMSE |
-|-------|------|
-| Before fine-tuning | [value] |
-| After fine-tuning | [value] |
-
-Improvement in performance suggests that regional adaptation is important due to differences in geological structure, sensor characteristics, and noise conditions. If improvement is minimal, it may indicate that the global model already generalizes well.
-
 ## 7.5 Limitations of the Approach
 
-Despite promising results, the proposed method has several limitations.
+Despite promising results, there are, however, several limitations.
 
 ### 7.5.1 Data Imbalance
 
-The most significant limitation is the imbalance in earthquake magnitudes. Because large earthquakes are rare, the model is trained primarily on small events. This can lead to underestimation of large magnitudes and reduced reliability for critical events.
+The most notable one is the natural data imbalance. As the dataset is not rich on high magnitude data, the model is trained primarily on small to medium events, which ultimately might lead to underestimation of extremely large earthquakes. Although those kind of events are so rare, they happen once a centry, they still cause the most destruction.
+
+It can be assumed that if synthetic data is used to mimick large-magnitude events, this problem will be solved, but the process of careful synthetic data generation must involve the experts who are able to minimize the chance of making a mistake that might result in a significant dataset bias. 
+
 
 ### 7.5.2 Dependence on P-wave Picking
 
-The model relies on accurate detection of P-wave arrival times. Errors in P-wave picking can result in incorrect window extraction and degraded model performance. In real-world systems, this dependency introduces an additional source of uncertainty.
+Our model is built on the premise of precise P-wave detection and while these days systems manage to catch P-waves quite efficiently, even small errors are still inevitable, which in real-world systems might produce additional uncertainty to the overall result.
 
-### 7.5.3 Limited Early Information
-
-The model operates on very short time windows (3–8 seconds), which inherently limits the available information. As noted in previous studies, early rupture signals may not fully determine the final earthquake magnitude. This creates a fundamental limitation independent of model architecture.
-
-### 7.5.4 Synthetic Data Limitations
-
-If synthetic data is used to augment large-magnitude events, discrepancies between simulated and real signals may introduce bias.
 
 ## 7.6 Comparison with Existing Approaches
 
-Compared to traditional EEW methods based on empirical relationships, the proposed approach offers direct mapping from waveform to magnitude, reduced reliance on handcrafted features, and potential for real-time inference.
+Compared to classic EEW methods, the proposed approach presents mapping from a limited amount of input data to a final magnitude, which eliminates the need to wait until the destructive waves arrive.
 
-Compared to other deep learning approaches, using spectrograms allows better noise robustness, and combining CNN and LSTM captures both spatial and temporal features. However, some modern approaches use transformers or fully convolutional architectures, which may offer competitive performance.
+Compared to other deep learning approaches, which for the most part solve a different task (phase picking, event detection/classifictation, etc.) our approach outputs a more verbose conclusion on the input data, which in theory gives more room to act for EEW.
 
 ## 7.7 Summary
 
-This chapter analyzed the experimental results and discussed the strengths and limitations of the proposed CNN–LSTM model.
+This chapter analyzed the results and discussed the strengths and limitations of the proposed approach.
 
-The findings suggest that early seismic signals contain sufficient information for approximate magnitude estimation, though performance depends strongly on dataset composition and model design.
+The findings suggest that early seismic signals contain sufficient enough information for our model to approximately estimate event's magnitude.
