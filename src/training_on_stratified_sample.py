@@ -1,17 +1,19 @@
 import json
 import logging
 import os
+import random
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Tuple
+import matplotlib
+
+matplotlib.use('Agg') 
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import DataLoader, Dataset
-import torchaudio.transforms as T
+from sklearn.decomposition import PCA
+from torch.utils.data import DataLoader
 from torchmetrics.regression import (
     MeanAbsolutePercentageError,
     PearsonCorrCoef,
@@ -19,6 +21,9 @@ from torchmetrics.regression import (
     SpearmanCorrCoef,
 )
 from tqdm import tqdm
+
+from dataset_definition import UnifiedSeismicDataset
+from model_definition import SeismicMagnitudePredictor
 
 logger = logging.getLogger(name='Seismic-Magnitude-training')
 implemented_scheduler_algs: List[str] = ['cos', 'exp']
@@ -32,173 +37,74 @@ def set_seed(seed: int = 67) -> None:
 # Set seed for NumPy, PyTorch, etc.
 set_seed()
 
-class UnifiedSeismicDataset(Dataset):
-    def __init__(
-        self, 
-        memmap_path: str,
-        csv_path: str,
-        n_samples: int,
-        target_length: int = 1000,
-        phase: Literal['train', 'val', 'test'] = 'train',
-        train_split: float = 0.7,
-        val_split: float = 0.2,
-        # test_split is thus: 1 - (train_split + val_split) = 0.1
-    ) -> None:
-        super().__init__()
+def _plot_pca(
+    model: SeismicMagnitudePredictor,
+    test_loader: DataLoader,
+    device: str,
+    save_dir: str,
+    filename: str = 'embedding_pca.jpg',
+) -> None:
+    """
+    Extracts 64-dim embeddings from the test set, runs PCA → 2 components,
+    and saves a scatter plot colored by magnitude bin (Low/Mid/High).
+    """
+    all_embeddings: List[np.ndarray] = []
+    all_magnitudes: List[np.ndarray] = []
 
-        if phase not in ['train', 'val', 'test']:
-            raise ValueError(
-                'phase is expected to be one of the:\n[train, val, test]\n\n'
-                f'but got {phase} instead.'
-                )
+    print('Extracting embeddings for PCA...')
+    with torch.inference_mode():
+        for inputs, targets in tqdm(test_loader, desc='PCA embedding extraction'):
+            inputs = inputs.to(device, non_blocking=True)
+            emb = model.encode(inputs)
+            all_embeddings.append(emb.cpu().numpy())
+            all_magnitudes.append(targets.numpy())
 
-        if not (0 < train_split < 1 and 0 < val_split < 1 and train_split + val_split < 1):
-            raise ValueError(
-                f'Invalid splits: train={train_split}, val={val_split}. '
-                'Must be positive and sum to less than 1.'
-            )
+    X = np.concatenate(all_embeddings, axis=0)  # (N, 64)
+    y = np.concatenate(all_magnitudes, axis=0).squeeze()  # (N,)
 
-        self.target_length = target_length
-        self.waveforms = np.memmap(
-            memmap_path, dtype='float32',
-            mode='r', shape=(n_samples, 3, 1000)
+    print(f'Embeddings shape: {X.shape}')
+
+    pca = PCA(n_components=2)
+    X_pca = pca.fit_transform(X)
+
+    ev = pca.explained_variance_ratio_
+    print(f'Explained variance — PC1: {ev[0]:.4f}, PC2: {ev[1]:.4f}')
+
+    # Bin magnitudes: 0 = Low [<3), 1 = Mid [3–5), 2 = High [5+]
+    bins = np.where(y < 3.0, 0, np.where(y < 5.0, 1, 2))
+
+    bin_colors = ['blue', 'orange', 'red']
+    bin_labels = ['Low [1-3)', 'Mid [3–5)', 'High [5+]']
+
+    fig, ax = plt.subplots(figsize=(12, 8), dpi=150)
+
+    for i in range(3):
+        idx = bins == i
+        ax.scatter(
+            X_pca[idx, 0],
+            X_pca[idx, 1],
+            s=10,
+            alpha=0.5,
+            color=bin_colors[i],
+            label=bin_labels[i],
         )
 
-        df = pd.read_csv(csv_path)
-        n = len(df)
-        train_end = int(n * train_split)
-        val_end = int(n * (train_split + val_split))
+    ax.set_title(
+        f'PCA of learned embeddings (CNN + LSTM)\n'
+        f'PC1: {ev[0]*100:.1f}% var | PC2: {ev[1]*100:.1f}% var',
+        fontsize=20,
+        fontweight='bold',
+    )
+    ax.set_xlabel('PC1')
+    ax.set_ylabel('PC2')
+    ax.legend()
+    ax.grid(True)
 
-        if phase == 'train':
-            self.metadata = df.iloc[:train_end].reset_index(drop=True)
-            self.indices = list(range(train_end))
-        elif phase == 'val':
-            self.metadata = df.iloc[train_end:val_end].reset_index(drop=True)
-            self.indices = list(range(train_end, val_end))
-        else:
-            self.metadata = df.iloc[val_end:].reset_index(drop=True)
-            self.indices = list(range(val_end, n))
-
-        logger.info(f"Initialized {phase} dataset with {len(self.metadata)} valid traces.")
-
-        # STFT Parameters
-        self.fs = 100
-        self.N = 128
-        self.overlap = 0.70
-        self.hop_size = int(self.N * (1 - self.overlap)) 
-
-    def get_stft_params(self) -> Dict[str, Any]:
-        """Expose STFT config for external logging."""
-        return {
-            'stft_fs': self.fs,
-            'stft_window_size_N': self.N,
-            'stft_overlap': self.overlap,
-            'stft_hop_size': self.hop_size,
-            'stft_window_type': 'hann',
-            'stft_scale_to': 'magnitude',
-        }
-
-    def __len__(self) -> int:
-        return len(self.metadata)
-
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        wave = self.waveforms[self.indices[idx]].copy()  # (3, 1000)
-
-        # Zero out everything past target_length — this is how you swap
-        # between 3s/5s/8s experiments without re-running preprocessing
-        if self.target_length < 1000:
-            wave[:, self.target_length:] = 0.0
-
-        magnitude = torch.tensor(
-            [self.metadata.iloc[idx]['source_magnitude']], dtype=torch.float32
-        )
-        return torch.from_numpy(wave), magnitude
-
-
-class SeismicCNNBackbone(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.conv_block = nn.Sequential(
-            nn.Conv2d(3, 16, kernel_size=(5, 3), padding=(2, 1)),
-            nn.BatchNorm2d(16),
-            nn.ReLU(),
-            nn.Dropout2d(0.2),              # 2D dropout for conv layers
-            nn.MaxPool2d(kernel_size=(2, 1)),
-            nn.Conv2d(16, 32, kernel_size=(3, 3), padding=(1, 1)),
-            nn.BatchNorm2d(32),
-            nn.ReLU(),
-            nn.Dropout2d(0.2),
-            nn.MaxPool2d(kernel_size=(2, 2)),
-            nn.Conv2d(32, 64, kernel_size=(3, 3), padding=(1, 1)),
-            nn.BatchNorm2d(64),
-            nn.ReLU(),
-            nn.Dropout2d(0.2),
-            nn.AdaptiveAvgPool2d((1, 16))
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.conv_block(x) 
-        x = x.squeeze(2)      
-        return x
-
-
-class AttentionPooling(nn.Module):
-
-    def __init__(self, hidden_size: int) -> None:
-        super().__init__()
-        self.score = nn.Linear(hidden_size, 1, bias=False)
-
-    def forward(self, lstm_out: torch.Tensor) -> torch.Tensor:
-        # lstm_out: (batch, seq_len, hidden_size)
-        weights = F.softmax(self.score(lstm_out), dim=1)  # (batch, seq_len, 1)
-        pooled  = (weights * lstm_out).sum(dim=1)         # (batch, hidden_size)
-        return pooled
-
-
-class SeismicMagnitudePredictor(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        
-        # We define the STFT operation here so it GPU is utilized unlike with SciPy implenentation
-        self.spectrogram = T.Spectrogram(
-            n_fft=128,
-            win_length=128,
-            hop_length=38,         # 128 * (1 - 0.70)
-            window_fn=torch.hann_window,
-            power=1.0,             # power=1.0 in torchaudio is the equivalent to scale_to='magnitude'
-            center=False,          # padds the values at the end, not from both sides
-            normalized=False       
-        )
-
-        self.cnn = SeismicCNNBackbone()
-
-        self.lstm = nn.LSTM(input_size=64, hidden_size=64, num_layers=1, batch_first=True)
-
-        self.attention_pool = AttentionPooling(hidden_size=64)
-
-        self.mlp = nn.Sequential(
-            nn.Linear(64, 64),
-            nn.ReLU(),
-            nn.Dropout(0.4),
-            nn.Linear(64, 1) 
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # input data comes in raw form: (batch_size, 3, 1000)
-        
-        x = self.spectrogram(x)
-        x = torch.log1p(x)         
-
-        feats = self.cnn(x) # (batch, 64, 16)
-        lstm_input = feats.permute(0, 2, 1) # (batch, 16, 64)
-
-        lstm_out, _ = self.lstm(lstm_input)
-
-        # Attention pool over all 16 steps instead of grabbing just the last one
-        context = self.attention_pool(lstm_out)
-
-        magnitude_pred = self.mlp(context)
-        return magnitude_pred
+    plt.tight_layout()
+    save_path = os.path.join(save_dir, filename)
+    plt.savefig(save_path)
+    plt.close(fig)
+    print(f'PCA plot saved to `{save_path}`')
 
 
 def run_experiment(
@@ -220,7 +126,8 @@ def run_experiment(
     exp_lr_scheduler: float | None = 0.995,
     epochs: int = 300,
     no_progress_crash_out: int = 100,
-) -> None:
+    delta: float = 1.0,            
+) -> Dict[str, Any]:
 
     if scheduler_alg == 'cos' and cos_eta_min is None:
         raise ValueError('`scheduler_alg` is cos, but `cos_eta_min` left unspecified.')
@@ -243,6 +150,7 @@ def run_experiment(
     viz_file_name: str = 'training_metrics.jpg'
     extra_metrics_file_name: str = 'regression_metrics.jpg'
     residuals_file_name: str = 'residuals_test.jpg'
+    pca_file_name: str = 'embedding_pca.jpg'
     hyperparam_filename: str = 'hyperparams.json'
 
     os.makedirs(result_dir, exist_ok=True)
@@ -297,7 +205,7 @@ def run_experiment(
         if loss_function == 'MSE':
             criterion = nn.MSELoss()
         elif loss_function == 'HuberLoss':  
-            criterion = nn.HuberLoss()
+            criterion = nn.HuberLoss(delta=delta)
         else:
             raise NotImplementedError(
                 'Loss function is expected to be one of the following:\n["MSE", "HuberLoss"]\n'
@@ -340,6 +248,7 @@ def run_experiment(
             'target_length': target_length,
             'pad_length': pad_length,
             'loss_fn': loss_function,
+            'delta': delta,
             'lr_scheduler': lr_scheduler_name,
             'lr_scheduler_param': lr_scheduler_param,
             **stft_params,  # STFT params logged here
@@ -580,9 +489,9 @@ def run_experiment(
             test_preds.append(outputs.squeeze(1).cpu())
             test_targets.append(targets.squeeze(1).cpu())
 
-    test_preds_np   = torch.cat(test_preds).numpy()
+    test_preds_np = torch.cat(test_preds).numpy()
     test_targets_np = torch.cat(test_targets).numpy()
-    residuals       = test_preds_np - test_targets_np  # positive = over-prediction
+    residuals = test_preds_np - test_targets_np  # positive = over-prediction
 
     # Log the summary
     print(
@@ -603,8 +512,10 @@ def run_experiment(
     axes3[0].set_xlim(mag_min, mag_max)
     axes3[0].set_ylim(mag_min, mag_max)
     axes3[0].set_xlabel('Ground Truth Magnitude')
-    axes3[0].set_ylabel('Predicted Magnitude')
-    axes3[0].set_title('Predicted vs Ground Truth')
+    axes3[0].set_ylabel('Predicted Magnitude', rotation='horizontal', labelpad=60)
+    # axes3[0].set_title('Predicted vs Ground Truth')
+    axes3[0].spines['top'].set_visible(False)
+    axes3[0].spines['right'].set_visible(False)
     axes3[0].legend(fontsize=9)
 
     # 2. Residuals histogram
@@ -613,8 +524,10 @@ def run_experiment(
     axes3[1].axvline(np.mean(residuals), color='orange', linestyle='-', linewidth=1.2,
                      label=f'Mean = {np.mean(residuals):.3f}')
     axes3[1].set_xlabel('Residual (Predicted − Ground Truth)')
-    axes3[1].set_ylabel('Count')
-    axes3[1].set_title('Residuals Distribution')
+    axes3[1].set_ylabel('Count', rotation='horizontal', labelpad=25)
+    # axes3[1].set_title('Residuals Distribution')
+    axes3[1].spines['top'].set_visible(False)
+    axes3[1].spines['right'].set_visible(False)
     axes3[1].legend(fontsize=9)
 
     plt.tight_layout()
@@ -622,13 +535,201 @@ def run_experiment(
     plt.close(fig3)
     print(f'Residuals plot saved to `{os.path.join(current_experiment_dir, residuals_file_name)}`')
 
+    test_preds_tensor = torch.from_numpy(test_preds_np)
+    test_targets_tensor = torch.from_numpy(test_targets_np)
+
+    test_mae  = float(np.mean(np.abs(residuals)))
+    test_rmse = float(np.sqrt(np.mean(residuals**2)))
+    test_bias = float(np.mean(residuals))
+    test_mape = float(MeanAbsolutePercentageError()(test_preds_tensor, test_targets_tensor))
+    test_r2   = float(R2Score()(test_preds_tensor, test_targets_tensor))
+
+    abs_errors = np.abs(residuals)
+    boot_means = np.array([
+        np.mean(rng.choice(abs_errors, size=len(abs_errors), replace=True))
+        for rng in [np.random.default_rng(i) for i in range(2000)]
+    ])
+    ci_low, ci_high = float(np.percentile(boot_means, 2.5)), float(np.percentile(boot_means, 97.5))
+
+    test_metrics = {
+        'test_MAE': test_mae,
+        'test_RMSE': test_rmse,
+        'test_bias': test_bias,
+        'test_MAPE': test_mape,
+        'test_R2': test_r2,
+        'test_MAE_95CI': [ci_low, ci_high],
+    }
+
+    # Append test metrics to the existing hyperparams JSON
+    hyperparam_path = os.path.join(current_experiment_dir, hyperparam_filename)
+    with open(hyperparam_path, 'r') as f:
+        saved_hyperparams = json.load(f)
+    saved_hyperparams.update(test_metrics)
+    with open(hyperparam_path, 'w') as f:
+        json.dump(obj=saved_hyperparams, fp=f, indent=4)
+
+    # PCA of test set
+    _plot_pca(
+        model=best_model,
+        test_loader=test_loader,
+        device=device,
+        save_dir=current_experiment_dir,
+        filename=pca_file_name,
+    )
+
     del best_model
     torch.cuda.empty_cache()
+
+    return test_metrics
+
+
+def _sample_hparams(rng: random.Random) -> Dict[str, Any]:
+    """
+    Draws one random hyperparameter configuration.
+
+    Ranges are chosen around the known-good baseline
+    (lr=1e-3, wd=4e-3, batch=512, HuberLoss, exp/γ=0.995)
+    while being wide enough to actually explore.
+
+    Sampling strategy per param:
+      lr           — log-uniform in [5e-5, 5e-3]:  small-to-large LR matters a lot
+      weight_decay — log-uniform in [1e-4, 1e-2]:  regularisation strength
+      batch_size   — categorical {128, 256, 512}:   memory-safe options
+      loss_fn      — categorical {MSE, HuberLoss}:  both are plausible for regression
+      scheduler    — categorical {exp, cos}:
+          exp  → gamma log-uniform in [0.985, 0.999]   (slow-to-fast decay)
+          cos  → eta_min log-uniform in [1e-7, 1e-5]   (floor for cosine schedule)
+      no_progress_crash_out — uniform int in [60, 150]: patience window
+    """
+    lr           = 10 ** rng.uniform(-3.3, -2.3)
+    weight_decay = 10 ** rng.uniform(-3.0, -2.0)
+    batch_size   = rng.choice([128, 256])
+    delta        = rng.uniform(0.15, 0.6)
+    loss_fn      = 'HuberLoss'  
+    scheduler    = 'cos'
+    no_progress  = 150
+
+    cos_eta_min      = None
+    exp_lr_scheduler = None
+
+    if scheduler == 'exp':
+        exp_lr_scheduler = 10 ** rng.uniform(-1.5 / 300, 0)  # γ in [0.985, 0.999]
+        # More direct: uniform in the gamma range itself
+        exp_lr_scheduler = rng.uniform(0.985, 0.999)
+    else:
+        cos_eta_min = 10 ** rng.uniform(-7, -5)
+
+    return {
+        'lr':                 lr,
+        'weight_decay':       weight_decay,
+        'batch_size':         batch_size,
+        'loss_function':      loss_fn,
+        'scheduler_alg':      scheduler,
+        'cos_eta_min':        cos_eta_min,
+        'exp_lr_scheduler':   exp_lr_scheduler,
+        'no_progress_crash_out': no_progress,
+        'delta':              delta,
+    }
+
+
+def run_hparam_search(
+    memmap_path: str,
+    csv_path: str,
+    n_samples: int,
+    base_experiment_name: str,
+    target_length: int = 1000,
+    pad_length: int = 0,
+    train_split: float = 0.7,
+    val_split: float = 0.2,
+    epochs: int = 300,
+    n_trials: int = 15,
+    seed: int = 42,
+) -> None:
+    """
+    Runs `n_trials` randomly sampled configurations by calling `run_experiment`.
+
+    Each trial is saved under:
+        training_results/<date>/<base_experiment_name>/hparam_search/trial_<N>/
+
+    A summary JSON with every trial's sampled config is written to:
+        training_results/<date>/<base_experiment_name>/hparam_search/search_summary.json
+
+    Args:
+        n_trials:   How many random configs to try. 15 is a reasonable budget
+                    for this search space — enough coverage without going broke
+                    on GPU time.
+        seed:       Controls the RNG for reproducible trial sampling. Individual
+                    model training is still governed by set_seed() at module level.
+    """
+    rng = random.Random(seed)
+
+    yyyy = str(datetime.today().year)
+    mm   = str(datetime.today().month)
+    dd   = str(datetime.today().day)
+
+    search_root = os.path.join(
+        './training_results', f'{yyyy}_{mm}_{dd}',
+        base_experiment_name, 'hparam_search'
+    )
+    os.makedirs(search_root, exist_ok=True)
+
+    summary: List[Dict[str, Any]] = []
+
+    print(f"\n{'='*60}")
+    print(f"Starting randomized hyperparameter search — {n_trials} trials")
+    print(f"Results root: {search_root}")
+    print(f"{'='*60}\n")
+
+    for trial_idx in range(1, n_trials + 1):
+        sampled = _sample_hparams(rng)
+
+        print(f"\n{'─'*60}")
+        print(f"Trial {trial_idx}/{n_trials}")
+        print(json.dumps(sampled, indent=2))
+        print(f"{'─'*60}\n")
+
+        trial_experiment_name = os.path.join(
+            base_experiment_name, 'hparam_search', f'trial_{trial_idx}'
+        )
+
+        try:
+            experiment_test_metrics = run_experiment(
+                memmap_path=memmap_path,
+                csv_path=csv_path,
+                n_samples=n_samples,
+                experiment_name=trial_experiment_name,
+                target_length=target_length,
+                pad_length=pad_length,
+                train_split=train_split,
+                val_split=val_split,
+                epochs=epochs,
+                **sampled,
+            )
+            status = 'completed'
+        except Exception as e:
+            print(f'Trial {trial_idx} failed with: {e}')
+            status = f'failed: {e}'
+
+        summary.append({
+            'trial': trial_idx,
+            'status': status,
+            'config': sampled,
+            'metrics': experiment_test_metrics if status == 'completed' else None,
+        })
+
+        # Flush summary after every trial so a crash mid-search doesn't lose results
+        summary_path = os.path.join(search_root, 'search_summary.json')
+        with open(summary_path, 'w') as f:
+            json.dump(summary, f, indent=4)
+
+    print(f"\n{'='*60}")
+    print(f"Hyperparameter search complete. Summary: {summary_path}")
+    print(f"{'='*60}\n")
 
 
 if __name__ == "__main__":
 
-    DATA_DIR: str = '/home/aidar/study/senior_thesis/data/INSTANCE/peak_normalized'
+    DATA_DIR: str = 'data/INSTANCE/peak_normalized'  # relative to repo root; run from there
     DATASET_NAME: str = os.path.join(DATA_DIR.split('/')[-2], DATA_DIR.split('/')[-1])
     info_file: str = 'info.json' 
     waveforms_events_file: str = 'waveforms_events.bin'
@@ -647,27 +748,51 @@ if __name__ == "__main__":
         1000
     ] 
     
-    for length in target_lengths:
-        print(f"\n{'='*50}\nRunning experiment for {length/100:.1f}s P-wave interval\n{'='*50}")
+    # best_trial_config: Dict[str, Any] = {
+    #     'lr': 0.0013678960863632696,
+    #     'weight_decay': 0.005067843068294094,
+    #     'batch_size': 128,
+    #     'loss_function': 'HuberLoss',
+    #     'scheduler_alg': 'cos',
+    #     'cos_eta_min': 8.6523999494305e-06
+    # }
+
+    # for length in target_lengths:
+    #     print(f"\n{'='*50}\nRunning experiment for {length/100:.1f}s P-wave interval\n{'='*50}")
         
-        # Calculate padding needed to always hit 10 seconds (1000 samples)
-        pad_needed = 1000 - length
+    #     # Calculate padding needed to always hit 10 seconds (1000 samples)
+    #     pad_needed = 1000 - length
         
-        run_experiment(
-            memmap_path=os.path.join(DATA_DIR, waveforms_events_file),
-            csv_path=os.path.join(DATA_DIR, metadata_events_file),
-            n_samples=n_samples,
-            experiment_name=os.path.join(DATASET_NAME, f'magnitude_pred_{length}_samples'),
-            target_length=length,
-            pad_length=pad_needed,
-            batch_size=512,
-            lr=5e-4,
-            weight_decay=4e-3,
-            train_split=0.7,
-            val_split=0.2,
-            # test = 0.1 implicitly
-            scheduler_alg='exp',
-            exp_lr_scheduler=0.990,
-            epochs=500,
-            no_progress_crash_out=500
-        )
+    #     run_experiment(
+    #         memmap_path=os.path.join(DATA_DIR, waveforms_events_file),
+    #         csv_path=os.path.join(DATA_DIR, metadata_events_file),
+    #         n_samples=n_samples,
+    #         experiment_name=os.path.join(DATASET_NAME, f'magnitude_pred_{length}_samples'),
+    #         target_length=length,
+    #         pad_length=pad_needed,
+    #         batch_size=best_trial_config['batch_size'],
+    #         lr=best_trial_config['lr'],
+    #         weight_decay=best_trial_config['weight_decay'],
+    #         loss_function=best_trial_config['loss_function'],
+    #         scheduler_alg=best_trial_config['scheduler_alg'],
+    #         cos_eta_min=best_trial_config['cos_eta_min'],
+    #         train_split=0.7,
+    #         val_split=0.2,
+    #         epochs=500,
+    #         no_progress_crash_out=500,
+    #     )
+
+    # Randomized hyperparameter search (full 10s window only)
+    run_hparam_search(
+        memmap_path=os.path.join(DATA_DIR, waveforms_events_file),
+        csv_path=os.path.join(DATA_DIR, metadata_events_file),
+        n_samples=n_samples,
+        base_experiment_name=os.path.join(DATASET_NAME, 'magnitude_pred_1000_samples'),
+        target_length=1000,
+        pad_length=0,
+        train_split=0.7,
+        val_split=0.2,
+        epochs=500,        # shorter budget per trial vs the main experiments
+        n_trials=30,
+        seed=67,
+    )
