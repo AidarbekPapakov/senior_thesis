@@ -1,3 +1,6 @@
+"""Experiment variant: mixes STEAD/INSTANCE noise traces (magnitude 0) into the stratified events.
+Kept for history; it uses its own noise-aware dataset and the older last-step-LSTM model."""
+
 import json
 import logging
 import os

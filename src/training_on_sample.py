@@ -1,3 +1,6 @@
+"""Early experiment: trains on the 10k INSTANCE sample (HDF5) with the original last-step-LSTM model.
+Kept for history; it defines its own dataset/model and does not use `model_definition.py`."""
+
 import json
 import logging
 import os

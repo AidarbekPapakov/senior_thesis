@@ -1,5 +1,6 @@
 """
-Unified dataset preprocessor — INSTANCE events + STEAD events + STEAD noise → memmap
+INSTANCE-only preprocessor (thesis dataset): stratified events + noise → peak-normalized memmap.
+Note: the rest of this docstring was inherited from `preprocess_unified.py`, which also mixes in STEAD.
 
 Output layout:
     ~/data/unified/
