@@ -1,0 +1,12 @@
+# Python 3.12. Versions are intentionally unpinned: the original environment was not recorded.
+torch
+torchaudio
+torchmetrics
+numpy
+pandas
+scipy
+scikit-learn
+h5py
+matplotlib
+tqdm
+jupyter
