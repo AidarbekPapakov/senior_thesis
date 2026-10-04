@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Dict, Literal, Tuple
 
 import numpy as np
@@ -5,7 +6,18 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
+logger = logging.getLogger(name='Seismic-Magnitude-training')
+
+
 class UnifiedSeismicDataset(Dataset):
+    """
+    Memory-mapped (N, 3, 1000) waveforms plus a metadata CSV with `source_magnitude`.
+
+    Rows are split sequentially into train/val/test (the preprocessing step already
+    shuffles), so `phase` only selects a slice. `target_length` zeroes the waveform
+    after that many samples to emulate shorter P-wave windows (300 = 3 s at 100 Hz).
+    """
+
     def __init__(
         self, 
         memmap_path: str,
@@ -51,6 +63,8 @@ class UnifiedSeismicDataset(Dataset):
         else:
             self.metadata = df.iloc[val_end:].reset_index(drop=True)
             self.indices = list(range(val_end, n))
+
+        logger.info(f"Initialized {phase} dataset with {len(self.metadata)} valid traces.")
 
         # STFT Parameters
         self.fs = 100
