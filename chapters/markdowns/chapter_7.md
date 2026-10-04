@@ -1,74 +1,29 @@
-# Chapter 7 — Discussion
+# Chapter 7 — Limitations
 
 ## 7.1 Overview
 
-This chapter interprets the results obtained from the experiments described in Chapter 6 and evaluates the effectiveness of the proposed CNN–LSTM model for earthquake magnitude estimation.
+This chapter discusses the limitations of the proposed approach from several perspectives, including dataset properties, methodological choices, and deployment considerations.
 
-The discussion focuses on three main aspects: model performance and predictive capability, impact of architectural and data-related choices, and limitations of the proposed approach.
+## 7.2 Data Imbalance
 
-Where numerical results are required, placeholders are used and should be replaced once the experiments are completed.
+The most prominent limitation is the naturally inherited imbalance of the data. The dataset is not rich in high-magnitude examples, so the model has seen only a small fraction of large-magnitude events. We did not observe a significant divergence on the test set, but the discrepancy between predictions and true magnitudes may grow substantially for very large events ($M > 7.0$). Although such events are exceedingly rare, they are the ones that cause the most destruction.
 
-## 7.2 Model Performance Analysis
+One remedy is carefully composed synthetic data that imitates large-magnitude events. This requires deep expertise in both seismology and regional characteristics to minimize the risk of data corruption.
 
-### 7.2.1 Overall Performance
+## 7.3 Single-Station Analysis
 
-The performance of the model is thus evaluated using the metrics defined in Chapter 3: Root Mean Squared Error (RMSE), Mean Absolute Error (MAE), coefficient of determination ($R^2$), and Pearson correlation coefficient.
+The proposed model operates on observations from a single station. Modern operational EEW systems typically aggregate observations from multiple stations to improve both accuracy and robustness. A single-station model is more vulnerable to local site effects and isolated noise events. Extending the architecture to a multi-station setting is a direction for future work.
 
-The best performing model achieved the following metrics in the test set:
+## 7.4 Dependence on P-wave Picking
 
-| Metric | Value |
-|--------|-------|
-| RMSE | [value] |
-| MAE | [value] |
-| $R^2$ | [value] |
-| Pearson $r$ | [value] |
+The model relies on precise P-wave detection to extract the input window. While modern systems detect P-waves efficiently, small picking errors are inevitable. In a real deployment, even small offsets in the assumed P-wave arrival shift the input window and add noise to the input, which increases uncertainty in the magnitude estimate.
 
-From these results we can draw a conclusion that model has learnt to capturing the relationship between early waveform features and earthquake ultimate magnitude.
+A robust deployment would either pair the model with a high-quality phase picker (such as PhaseNet) or expose the model during training to imperfectly picked arrival times, so that it becomes more resilient to small timing errors.
 
-### 7.2.2 Error Characteristics
+## 7.5 Regional Variability
 
-We also provide the distribution of residuals of predictions, which adds more insight into model's performance.
+All training data come from the INSTANCE dataset, which is geographically concentrated in Italy. Seismic waveforms depend on local geological conditions, so a model trained on Italian seismicity is unlikely to perform well in a different region (for example, Kyrgyzstan) without fine-tuning or full retraining on local data.
 
-From the histogram (Figure [X]), it is seen that the model has zero bias (average residual close to zero) and a moderate deviation.
+## 7.6 Summary
 
-### 7.3.2 Effect of Window Length
-
-The experiment on different observation window lengths shows the following trend:
-
-| Window | RMSE |
-|--------|------|
-| 3 s | [value] |
-| 5 s | [value] |
-| 8 s | [value] |
-
-In general, increasing the window length leads to [improved / marginally improved / unchanged] performance. This is expected because longer windows contain more information about the rupture process. However, this improvement comes at the cost of increased warning latency.
-
-Thus, there exists a trade-off between prediction accuracy and response time, which is critical for practical EEW systems.
-
-## 7.5 Limitations of the Approach
-
-Despite promising results, there are, however, several limitations.
-
-### 7.5.1 Data Imbalance
-
-The most notable one is the natural data imbalance. As the dataset is not rich on high magnitude data, the model is trained primarily on small to medium events, which ultimately might lead to underestimation of extremely large earthquakes. Although those kind of events are so rare, they happen once a centry, they still cause the most destruction.
-
-It can be assumed that if synthetic data is used to mimick large-magnitude events, this problem will be solved, but the process of careful synthetic data generation must involve the experts who are able to minimize the chance of making a mistake that might result in a significant dataset bias. 
-
-
-### 7.5.2 Dependence on P-wave Picking
-
-Our model is built on the premise of precise P-wave detection and while these days systems manage to catch P-waves quite efficiently, even small errors are still inevitable, which in real-world systems might produce additional uncertainty to the overall result.
-
-
-## 7.6 Comparison with Existing Approaches
-
-Compared to classic EEW methods, the proposed approach presents mapping from a limited amount of input data to a final magnitude, which eliminates the need to wait until the destructive waves arrive.
-
-Compared to other deep learning approaches, which for the most part solve a different task (phase picking, event detection/classifictation, etc.) our approach outputs a more verbose conclusion on the input data, which in theory gives more room to act for EEW.
-
-## 7.7 Summary
-
-This chapter analyzed the results and discussed the strengths and limitations of the proposed approach.
-
-The findings suggest that early seismic signals contain sufficient enough information for our model to approximately estimate event's magnitude.
+This chapter discussed the main limitations of the proposed approach: dataset imbalance, single-station design, dependence on P-wave picking, and regional variability of seismic signals. The results indicate that early seismic signals contain enough information to make an approximate estimate of event magnitude, but several practical concerns must be addressed before such a system can be considered operationally mature.
